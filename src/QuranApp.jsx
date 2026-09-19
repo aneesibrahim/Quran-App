@@ -3,7 +3,7 @@ import {
   Search, ChevronLeft, Play, Pause, SkipBack, SkipForward,
   Bookmark, BookmarkCheck, Copy, Check, Moon, Sun,
   Loader2, BookOpen, AlertCircle, Clock, Compass, MapPin,
-  ChevronDown, Droplets, Info,
+  ChevronDown, Droplets, Info, Volume2, Bell, BellOff,
 } from 'lucide-react';
 
 /**
@@ -34,6 +34,34 @@ const LS_BOOKMARKS = 'quran_reader_bookmarks_v1';
 const LS_LAST_READ = 'quran_reader_last_read_v1';
 const LS_THEME = 'quran_reader_theme_v1';
 const LS_PRAYER_LOCATION = 'quran_reader_prayer_location_v1';
+const LS_REMINDERS = 'quran_reader_prayer_reminders_v1';
+
+// Optional: point this at an Adhan (call to prayer) recording you have the
+// rights to use — e.g. a file you add to your project's `public/` folder
+// (then set this to '/adhan.mp3') or a URL you trust. There is no reliable,
+// well-documented free public API for Adhan *audio* the way there is for
+// Quran recitation, so none is bundled by default. Leave this blank and the
+// app will play a short generated reminder chime instead, and always show
+// the full Azan text below.
+const ADHAN_AUDIO_URL = '';
+
+const AZAN_LINES = [
+  { arabic: 'اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ', translit: 'Allahu Akbar, Allahu Akbar', translation: 'Allah is the Greatest, Allah is the Greatest', repeat: 2 },
+  { arabic: 'أَشْهَدُ أَنْ لَا إِلَٰهَ إِلَّا اللَّهُ', translit: 'Ash-hadu al-la ilaha illallah', translation: 'I bear witness that there is no god but Allah', repeat: 2 },
+  { arabic: 'أَشْهَدُ أَنَّ مُحَمَّدًا رَسُولُ اللَّهِ', translit: 'Ash-hadu anna Muhammadar-Rasulullah', translation: 'I bear witness that Muhammad is the Messenger of Allah', repeat: 2 },
+  { arabic: 'حَيَّ عَلَى الصَّلَاةِ', translit: "Hayya 'alas-Salah", translation: 'Come to prayer', repeat: 2 },
+  { arabic: 'حَيَّ عَلَى الْفَلَاحِ', translit: "Hayya 'alal-Falah", translation: 'Come to success', repeat: 2 },
+  {
+    arabic: 'الصَّلَاةُ خَيْرٌ مِنَ النَّوْمِ',
+    translit: 'As-salatu khayrun minan-nawm',
+    translation: 'Prayer is better than sleep',
+    repeat: 2,
+    fajrOnly: true,
+    note: 'Added only in the Fajr (dawn) Azan, after "Come to success".',
+  },
+  { arabic: 'اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ', translit: 'Allahu Akbar, Allahu Akbar', translation: 'Allah is the Greatest, Allah is the Greatest', repeat: 1 },
+  { arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ', translit: 'La ilaha illallah', translation: 'There is no god but Allah', repeat: 1 },
+];
 
 const WUDU_STEPS = [
   { title: 'Intention (Niyyah)', text: 'Silently intend in your heart to perform wudu for the purpose of prayer.' },
@@ -46,6 +74,12 @@ const WUDU_STEPS = [
   { title: 'Wipe head', text: 'Wipe the head once with wet hands, front to back.' },
   { title: 'Wipe ears', text: 'Wipe the inside and outside of both ears with wet fingers.' },
   { title: 'Wash feet', text: 'Wash the right foot up to and including the ankle three times, then the left foot the same way.' },
+  {
+    title: 'Dua after Wudu',
+    arabic: 'أَشْهَدُ أَنْ لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، وَأَشْهَدُ أَنَّ مُحَمَّدًا عَبْدُهُ وَرَسُولُهُ',
+    translit: "Ashhadu an la ilaha illallahu wahdahu la sharika lah, wa ashhadu anna Muhammadan 'abduhu wa rasuluh",
+    text: '"I bear witness that there is no god but Allah alone, without partner, and I bear witness that Muhammad is His servant and messenger."',
+  },
 ];
 
 const SALAH_STEPS = [
@@ -58,50 +92,80 @@ const SALAH_STEPS = [
     note: 'Raise both hands to your ears or shoulders and say this, entering the state of prayer.',
   },
   {
-    title: '3. Standing recitation',
-    note: "Recite Surah Al-Fatiha, followed by another short surah or passage in the first two rakahs. You can read Al-Fatiha any time in the Qur'an tab above.",
+    title: '3. Opening dua (Istiftah)',
+    arabic: 'سُبْحَانَكَ اللَّهُمَّ وَبِحَمْدِكَ، وَتَبَارَكَ اسْمُكَ، وَتَعَالَى جَدُّكَ، وَلَا إِلَٰهَ غَيْرُكَ',
+    translit: "Subhanaka Allahumma wa bihamdika, wa tabarakasmuka, wa ta'ala jadduka, wa la ilaha ghairuk",
+    translation: 'Glory is to You, O Allah, and praise; blessed is Your name, exalted is Your majesty, and there is no god besides You',
+    note: 'Recited silently, just after the opening Takbir, before Al-Fatiha. Sunnah — recommended but not obligatory; several other versions of this dua also exist.',
   },
   {
-    title: '4. Ruku (Bowing)',
+    title: '4. Standing recitation',
+    note: "Recite Surah Al-Fatiha, followed by another short surah or passage, in the first two rakahs. You can read Al-Fatiha any time in the Qur'an tab above.",
+  },
+  {
+    title: '5. Ruku (Bowing)',
     arabic: 'سُبْحَانَ رَبِّيَ الْعَظِيمِ',
     translit: 'Subhana Rabbiyal-Adheem',
     translation: 'Glory is to my Lord, the Most Great',
     note: 'Bow with your back straight and hands on your knees, repeating this three times.',
   },
   {
-    title: '5. Rising from Ruku',
-    arabic: 'سَمِعَ اللَّهُ لِمَنْ حَمِدَهُ ۚ رَبَّنَا وَلَكَ الْحَمْدُ',
-    translit: 'Sami Allahu liman hamidah · Rabbana wa lakal-hamd',
-    translation: 'Allah hears whoever praises Him · Our Lord, praise be to You',
-    note: 'Stand up straight before moving into prostration.',
+    title: '6. Rising from Ruku',
+    arabic: 'سَمِعَ اللَّهُ لِمَنْ حَمِدَهُ ۚ رَبَّنَا وَلَكَ الْحَمْدُ حَمْدًا كَثِيرًا طَيِّبًا مُبَارَكًا فِيهِ',
+    translit: 'Sami Allahu liman hamidah · Rabbana wa lakal-hamdu hamdan kathiran tayyiban mubarakan feeh',
+    translation: 'Allah hears whoever praises Him · Our Lord, to You belongs praise — abundant, good, and blessed praise',
+    note: 'Stand up straight before moving into prostration. The shorter "Rabbana wa lakal-hamd" is also commonly used.',
   },
   {
-    title: '6. Sujud (Prostration)',
+    title: '7. Sujud (Prostration)',
     arabic: 'سُبْحَانَ رَبِّيَ الْأَعْلَى',
     translit: "Subhana Rabbiyal-A'la",
     translation: 'Glory is to my Lord, the Most High',
     note: 'Prostrate with forehead, nose, palms, knees and toes touching the ground, repeating this three times. Performed twice each rakah, with a brief sitting in between.',
   },
   {
-    title: '7. Sitting between prostrations',
-    arabic: 'رَبِّ اغْفِرْ لِي',
-    translit: 'Rabbighfir li',
-    translation: 'My Lord, forgive me',
-    note: 'Sit briefly on the left foot before the second prostration.',
+    title: '8. Sitting between prostrations',
+    arabic: 'رَبِّ اغْفِرْ لِي وَارْحَمْنِي وَاجْبُرْنِي وَارْفَعْنِي وَارْزُقْنِي وَاهْدِنِي وَعَافِنِي وَاعْفُ عَنِّي',
+    translit: "Rabbighfir li, warhamni, wajburni, warfa'ni, warzuqni, wahdini, wa 'afini, wa'fu 'anni",
+    translation: 'My Lord, forgive me, have mercy on me, mend my affairs, raise my rank, grant me provision, guide me, grant me wellbeing, and pardon me',
+    note: 'A shorter "Rabbighfir li" (My Lord, forgive me) is also commonly used here.',
   },
   {
-    title: '8. Tashahhud (Sitting)',
-    arabic: 'التَّحِيَّاتُ لِلَّهِ وَالصَّلَوَاتُ وَالطَّيِّبَاتُ...',
-    translit: 'At-tahiyyatu lillahi was-salawatu wat-tayyibat...',
-    translation: 'All greetings, prayers and good things are for Allah...',
-    note: 'Recited while sitting after two rakahs, and again at the end of the prayer, followed by blessings upon the Prophet (Salawat).',
+    title: '9. Tashahhud (Sitting)',
+    arabic:
+      'التَّحِيَّاتُ لِلَّهِ وَالصَّلَوَاتُ وَالطَّيِّبَاتُ، السَّلَامُ عَلَيْكَ أَيُّهَا النَّبِيُّ وَرَحْمَةُ اللَّهِ وَبَرَكَاتُهُ، السَّلَامُ عَلَيْنَا وَعَلَى عِبَادِ اللَّهِ الصَّالِحِينَ، أَشْهَدُ أَنْ لَا إِلَٰهَ إِلَّا اللَّهُ وَأَشْهَدُ أَنَّ مُحَمَّدًا عَبْدُهُ وَرَسُولُهُ',
+    translit:
+      "At-tahiyyatu lillahi was-salawatu wat-tayyibat, as-salamu 'alayka ayyuhan-nabiyyu wa rahmatullahi wa barakatuh, as-salamu 'alayna wa 'ala 'ibadillahis-salihin, ash-hadu al-la ilaha illallah wa ash-hadu anna Muhammadan 'abduhu wa rasuluh",
+    translation:
+      'All greetings, prayers and good things are due to Allah. Peace be upon you, O Prophet, and the mercy of Allah and His blessings. Peace be upon us and upon the righteous servants of Allah. I bear witness that there is no god but Allah, and I bear witness that Muhammad is His servant and messenger',
+    note: 'Recited while sitting after two rakahs, and again at the end of the prayer.',
   },
   {
-    title: '9. Taslim (Ending)',
+    title: '10. Durood Ibrahim (Salawat)',
+    arabic:
+      'اللَّهُمَّ صَلِّ عَلَى مُحَمَّدٍ وَعَلَى آلِ مُحَمَّدٍ، كَمَا صَلَّيْتَ عَلَى إِبْرَاهِيمَ وَعَلَى آلِ إِبْرَاهِيمَ، إِنَّكَ حَمِيدٌ مَجِيدٌ. اللَّهُمَّ بَارِكْ عَلَى مُحَمَّدٍ وَعَلَى آلِ مُحَمَّدٍ، كَمَا بَارَكْتَ عَلَى إِبْرَاهِيمَ وَعَلَى آلِ إِبْرَاهِيمَ، إِنَّكَ حَمِيدٌ مَجِيدٌ',
+    translit:
+      'Allahumma salli \u2018ala Muhammadin wa \u2018ala aali Muhammad, kama sallayta \u2018ala Ibrahima wa \u2018ala aali Ibrahim, innaka Hamidum-Majid. Allahumma barik \u2018ala Muhammadin wa \u2018ala aali Muhammad, kama barakta \u2018ala Ibrahima wa \u2018ala aali Ibrahim, innaka Hamidum-Majid',
+    translation:
+      'O Allah, send blessings upon Muhammad and the family of Muhammad, as You sent blessings upon Ibrahim and the family of Ibrahim; indeed You are Praiseworthy, Glorious. O Allah, bless Muhammad and the family of Muhammad, as You blessed Ibrahim and the family of Ibrahim; indeed You are Praiseworthy, Glorious',
+    note: 'Recited in the final Tashahhud, after the testimony of faith, before ending the prayer.',
+  },
+  {
+    title: '11. Dua before Salam (optional)',
+    arabic:
+      'اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنْ عَذَابِ جَهَنَّمَ، وَمِنْ عَذَابِ الْقَبْرِ، وَمِنْ فِتْنَةِ الْمَحْيَا وَالْمَمَاتِ، وَمِنْ شَرِّ فِتْنَةِ الْمَسِيحِ الدَّجَّالِ',
+    translit:
+      "Allahumma inni a'udhu bika min 'adhabi jahannam, wa min 'adhabil-qabr, wa min fitnatil-mahya wal-mamat, wa min sharri fitnatil-masihid-dajjal",
+    translation:
+      'O Allah, I seek refuge in You from the punishment of Hell, from the punishment of the grave, from the trials of life and death, and from the evil of the trial of the False Messiah',
+    note: 'A well-known optional addition after the final Tashahhud and Durood, before Taslim.',
+  },
+  {
+    title: '12. Taslim (Ending)',
     arabic: 'السَّلَامُ عَلَيْكُمْ وَرَحْمَةُ اللَّهِ',
     translit: 'Assalamu alaikum wa rahmatullah',
     translation: 'Peace and the mercy of Allah be upon you',
-    note: 'Turn your head to the right, then to the left, saying this each time to conclude the prayer.',
+    note: 'Turn your head to the right, then to the left, saying this each time, to conclude the prayer.',
   },
 ];
 
@@ -129,6 +193,30 @@ function to12h(timeStr) {
   h = h % 12;
   if (h === 0) h = 12;
   return `${h}:${mStr} ${suffix}`;
+}
+
+function playReminderChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const notes = [784, 659, 523];
+    notes.forEach((freq, i) => {
+      const start = ctx.currentTime + i * 0.35;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.2, start + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.4);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.45);
+    });
+  } catch {
+    // Web Audio unsupported/blocked — silently skip the chime, the text/notification still show.
+  }
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -940,11 +1028,18 @@ function PrayerSection({ t, isDark }) {
 
   const [expandedGuide, setExpandedGuide] = useState('wudu'); // 'wudu' | 'salah' | null
 
+  const [remindersOn, setRemindersOn] = useState(() => loadJSON(LS_REMINDERS, false));
+  const adhanAudioRef = useRef(null);
+
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     if (location) localStorage.setItem(LS_PRAYER_LOCATION, JSON.stringify(location));
   }, [location]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_REMINDERS, JSON.stringify(remindersOn));
+  }, [remindersOn]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000);
@@ -1042,28 +1137,106 @@ function PrayerSection({ t, isDark }) {
       .finally(() => setQiblaLoading(false));
   }, [location]);
 
-  // Live device compass
+  const playAdhanCue = useCallback(() => {
+    if (ADHAN_AUDIO_URL && adhanAudioRef.current) {
+      adhanAudioRef.current.currentTime = 0;
+      adhanAudioRef.current.play().catch(() => playReminderChime());
+    } else {
+      playReminderChime();
+    }
+  }, []);
+
+  const toggleReminders = async () => {
+    if (!remindersOn && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission().catch(() => {});
+    }
+    setRemindersOn((v) => !v);
+  };
+
+  // Schedule a one-shot alert (sound + system notification, if permitted) for
+  // each of today's remaining prayer times whenever timings load or reminders
+  // are turned on. Re-runs (and reschedules) if the page is left open past
+  // midnight, since `timings` gets refetched for the new day elsewhere.
+  useEffect(() => {
+    if (!timings || !remindersOn) return;
+    const today = new Date();
+    const timers = [];
+    ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'].forEach((key) => {
+      const [h, m] = (timings[key] || '').split(':').map(Number);
+      if (Number.isNaN(h) || Number.isNaN(m)) return;
+      const d = new Date(today);
+      d.setHours(h, m, 0, 0);
+      const msUntil = d.getTime() - Date.now();
+      if (msUntil > 0 && msUntil < 24 * 60 * 60 * 1000) {
+        const id = setTimeout(() => {
+          playAdhanCue();
+          if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`${key} — time for prayer`, { body: 'It is time for Salah.' });
+            } catch {
+              // Notification constructor can throw in some contexts (e.g. service-worker-only origins) — ignore.
+            }
+          }
+        }, msUntil);
+        timers.push(id);
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [timings, remindersOn, playAdhanCue]);
+
+  // Live device compass.
+  // Only trust *true* absolute headings — iOS's webkitCompassHeading, or a
+  // deviceorientation(absolute) event with e.absolute === true. A plain
+  // deviceorientation event with absolute:false is relative to wherever the
+  // phone happened to be pointed when the page loaded, not real north — using
+  // it was the main cause of the compass feeling wrong. Readings are also
+  // smoothed (shortest-path) to stop the needle jittering.
   useEffect(() => {
     if (!compassOn) return;
-    const handler = (e) => {
-      let h = null;
-      if (typeof e.webkitCompassHeading === 'number') {
-        h = e.webkitCompassHeading;
-      } else if (typeof e.alpha === 'number') {
-        h = 360 - e.alpha;
+    let gotAbsoluteReading = false;
+    let smoothed = null;
+
+    const applyHeading = (raw) => {
+      const clean = ((raw % 360) + 360) % 360;
+      if (smoothed === null) {
+        smoothed = clean;
+      } else {
+        let delta = clean - smoothed;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        smoothed = (smoothed + delta * 0.25 + 360) % 360;
       }
-      if (h !== null) setHeading(h);
+      setHeading(smoothed);
     };
+
+    const handler = (e) => {
+      if (typeof e.webkitCompassHeading === 'number') {
+        gotAbsoluteReading = true;
+        applyHeading(e.webkitCompassHeading);
+      } else if (e.absolute === true && typeof e.alpha === 'number') {
+        gotAbsoluteReading = true;
+        applyHeading(360 - e.alpha);
+      }
+      // Non-absolute events are ignored entirely — they aren't true compass headings.
+    };
+
     window.addEventListener('deviceorientationabsolute', handler, true);
     window.addEventListener('deviceorientation', handler, true);
+
+    const supportTimer = setTimeout(() => {
+      if (!gotAbsoluteReading) setCompassSupported(false);
+    }, 2500);
+
     return () => {
       window.removeEventListener('deviceorientationabsolute', handler, true);
       window.removeEventListener('deviceorientation', handler, true);
+      clearTimeout(supportTimer);
     };
   }, [compassOn]);
 
   const enableCompass = async () => {
     setCompassSupported(true);
+    setHeading(null);
     try {
       if (
         typeof DeviceOrientationEvent !== 'undefined' &&
@@ -1128,6 +1301,7 @@ function PrayerSection({ t, isDark }) {
         {[
           { key: 'timings', label: 'Timings', icon: Clock },
           { key: 'qibla', label: 'Qibla', icon: Compass },
+          { key: 'azan', label: 'Azan', icon: Volume2 },
           { key: 'guide', label: 'How to Pray', icon: Info },
         ].map(({ key, label, icon: Ic }) => (
           <button
@@ -1237,7 +1411,21 @@ function PrayerSection({ t, isDark }) {
                   </div>
                 ))}
               </div>
-              <p className={`text-xs ${t.textMuted} mt-4 text-center`}>
+              <button
+                onClick={toggleReminders}
+                className={`w-full flex items-center justify-center gap-2 text-sm px-4 py-2.5 rounded-xl border mt-4 ${
+                  remindersOn ? `${t.accentBg} text-white border-transparent` : `${t.cardBg}`
+                }`}
+              >
+                {remindersOn ? <Bell size={16} /> : <BellOff size={16} />}
+                {remindersOn ? 'Prayer reminders on' : 'Turn on prayer reminders'}
+              </button>
+              <p className={`text-xs ${t.textMuted} mt-2 text-center`}>
+                {remindersOn
+                  ? "A chime and (if allowed) a notification will play at each remaining prayer time today, while this page stays open."
+                  : "Plays a chime and shows a notification at each prayer time, while this page stays open."}
+              </p>
+              <p className={`text-xs ${t.textMuted} mt-3 text-center`}>
                 Calculated using the ISNA convention. Times may differ slightly from your local mosque's schedule.
               </p>
             </>
@@ -1309,18 +1497,68 @@ function PrayerSection({ t, isDark }) {
                 </button>
               ) : (
                 <p className={`text-xs ${t.textMuted} text-center max-w-xs`}>
-                  Hold your phone flat. The green arrow points toward the Qibla as you turn.
+                  Hold your phone flat, away from metal or magnets. The green arrow points toward the Qibla as
+                  you turn. If it feels off, wave your phone in a figure-8 a few times to recalibrate the
+                  magnetometer.
                 </p>
               )}
               {!compassSupported && (
                 <p className="text-xs text-red-500 mt-2 text-center max-w-xs">
-                  Live compass isn't available on this device or browser. Point the top of your screen North and
-                  use the number above instead.
+                  Live compass isn't available on this device or browser (it needs a magnetometer, HTTPS, and
+                  permission). Point the top of your screen North and use the number above instead.
                 </p>
               )}
             </div>
           )}
         </>
+      )}
+
+      {/* ---------------- Azan tab ---------------- */}
+      {tab === 'azan' && (
+        <div className="space-y-4">
+          <div className={`rounded-2xl border p-4 ${t.cardBg}`}>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <Volume2 size={16} className={t.accent} />
+                <span className="text-sm">Play</span>
+              </div>
+              <button
+                onClick={() => playAdhanCue()}
+                className={`text-xs px-4 py-2 rounded-lg ${t.accentBg} text-white`}
+              >
+                {ADHAN_AUDIO_URL ? 'Play Azan' : 'Play reminder chime'}
+              </button>
+            </div>
+            {!ADHAN_AUDIO_URL && (
+              <p className={`text-xs ${t.textMuted} mt-2 leading-relaxed`}>
+                There's no well-documented free public API for Adhan <em>audio</em> the way there is for Quran
+                recitation, so no recording is bundled here — this plays a short generated chime instead. If you
+                have an Adhan recording you're licensed to use, set <code>ADHAN_AUDIO_URL</code> near the top of
+                this file (e.g. to <code>/adhan.mp3</code> after adding the file to your project's{' '}
+                <code>public/</code> folder) and this button — plus prayer-time reminders — will play it instead.
+              </p>
+            )}
+          </div>
+
+          <div className={`rounded-2xl border ${t.cardBg} p-4`}>
+            <h3 className="text-sm font-semibold mb-3">The Call to Prayer (Azan)</h3>
+            <div className="space-y-3">
+              {AZAN_LINES.map((line, i) => (
+                <div key={i} className={`pb-3 ${i < AZAN_LINES.length - 1 ? `border-b ${t.divider}` : ''}`}>
+                  <p className="font-arabic text-xl leading-relaxed mb-1" dir="rtl">
+                    {line.arabic}
+                    {line.repeat > 1 && <span className={`text-sm font-sans ${t.textMuted}`}> (×{line.repeat})</span>}
+                  </p>
+                  <p className={`text-sm italic ${t.textMuted} mb-1`}>{line.translit}</p>
+                  <p className="text-sm">{line.translation}</p>
+                  {line.note && <p className={`text-xs ${t.textMuted} mt-1`}>{line.note}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {ADHAN_AUDIO_URL && <audio ref={adhanAudioRef} src={ADHAN_AUDIO_URL} preload="none" className="hidden" />}
+        </div>
       )}
 
       {/* ---------------- Guide tab ---------------- */}
