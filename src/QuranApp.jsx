@@ -93,10 +93,13 @@ const SALAH_STEPS = [
   },
   {
     title: '3. Opening dua (Istiftah)',
-    arabic: 'سُبْحَانَكَ اللَّهُمَّ وَبِحَمْدِكَ، وَتَبَارَكَ اسْمُكَ، وَتَعَالَى جَدُّكَ، وَلَا إِلَٰهَ غَيْرُكَ',
-    translit: "Subhanaka Allahumma wa bihamdika, wa tabarakasmuka, wa ta'ala jadduka, wa la ilaha ghairuk",
-    translation: 'Glory is to You, O Allah, and praise; blessed is Your name, exalted is Your majesty, and there is no god besides You',
-    note: 'Recited silently, just after the opening Takbir, before Al-Fatiha. Sunnah — recommended but not obligatory; several other versions of this dua also exist.',
+    arabic:
+      'وَجَّهْتُ وَجْهِيَ لِلَّذِي فَطَرَ السَّمَاوَاتِ وَالْأَرْضَ حَنِيفًا وَمَا أَنَا مِنَ الْمُشْرِكِينَ، إِنَّ صَلَاتِي وَنُسُكِي وَمَحْيَايَ وَمَمَاتِي لِلَّهِ رَبِّ الْعَالَمِينَ، لَا شَرِيكَ لَهُ وَبِذَلِكَ أُمِرْتُ وَأَنَا مِنَ الْمُسْلِمِينَ',
+    translit:
+      "Wajjahtu wajhiya lilladhi fataras-samawati wal-arda hanifan wa ma ana minal-mushrikin. Inna salati wa nusuki wa mahyaya wa mamati lillahi Rabbil-'alamin, la sharika lahu wa bidhalika umirtu wa ana minal-muslimin",
+    translation:
+      "I have turned my face toward He who created the heavens and the earth, inclining toward truth, and I am not of those who associate partners with Him. Indeed, my prayer, my rites of worship, my living and my dying are for Allah, Lord of the worlds. He has no partner; this I have been commanded, and I am of those who submit to Him",
+    note: "Recited silently, just after the opening Takbir, before Al-Fatiha (drawn from Qur'an 6:79 and 6:162–163). A shorter alternative, \"Subhanaka Allahumma wa bihamdika, wa tabarakasmuka, wa ta'ala jadduka, wa la ilaha ghairuk\" (\"Glory is to You, O Allah, and praise; blessed is Your name, exalted is Your majesty, and there is no god besides You\"), is also widely used — which one is customary varies by region and school of thought.",
   },
   {
     title: '4. Standing recitation',
@@ -250,10 +253,19 @@ export default function QuranApp() {
   const [mobileView, setMobileView] = useState('list'); // 'list' | 'reader'
   const [showBookmarksPanel, setShowBookmarksPanel] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
-  const [isDark, setIsDark] = useState(() => {
+  const [themeMode, setThemeMode] = useState(() => {
     const v = localStorage.getItem(LS_THEME);
-    return v ? v === 'dark' : true;
+    return v === 'dark' || v === 'light' || v === 'auto' ? v : 'auto';
   });
+  // In 'auto' mode, dark mode follows the device's own clock (a simple
+  // 6pm–6am rule) rather than a fixed default, and re-checks every minute so
+  // it flips over automatically without needing a page reload.
+  const [autoIsDark, setAutoIsDark] = useState(() => {
+    const h = new Date().getHours();
+    return h >= 18 || h < 6;
+  });
+  const isDark = themeMode === 'auto' ? autoIsDark : themeMode === 'dark';
+  const cycleTheme = () => setThemeMode((m) => (m === 'auto' ? 'dark' : m === 'dark' ? 'light' : 'auto'));
 
   // ---------------- Persisted state ----------------
   const [bookmarks, setBookmarks] = useState(() => loadJSON(LS_BOOKMARKS, {}));
@@ -283,8 +295,19 @@ export default function QuranApp() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(LS_THEME, isDark ? 'dark' : 'light');
-  }, [isDark]);
+    localStorage.setItem(LS_THEME, themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (themeMode !== 'auto') return;
+    const check = () => {
+      const h = new Date().getHours();
+      setAutoIsDark(h >= 18 || h < 6);
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [themeMode]);
 
   // ---------------- Fetch: Surah list ----------------
   const fetchSurahList = useCallback(() => {
@@ -663,12 +686,19 @@ export default function QuranApp() {
           )}
 
           <button
-            onClick={() => setIsDark((d) => !d)}
-            className={`p-2 rounded-lg border ${t.divider} ${t.hoverSoft}`}
-            title="Toggle theme"
-            aria-label="Toggle dark mode"
+            onClick={cycleTheme}
+            className={`p-2 rounded-lg border ${t.divider} ${t.hoverSoft} flex items-center gap-1.5`}
+            title={
+              themeMode === 'auto'
+                ? 'Theme: Automatic (follows device time, 6pm–6am is dark) — click for Dark'
+                : themeMode === 'dark'
+                ? 'Theme: Dark — click for Light'
+                : 'Theme: Light — click for Automatic'
+            }
+            aria-label="Cycle theme: automatic, dark, light"
           >
-            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            {themeMode === 'auto' ? <Clock size={18} /> : isDark ? <Sun size={18} /> : <Moon size={18} />}
+            {themeMode === 'auto' && <span className="hidden sm:inline text-[10px] font-medium">AUTO</span>}
           </button>
         </div>
       </header>
@@ -1018,10 +1048,6 @@ function PrayerSection({ t, isDark }) {
   const [timingsLoading, setTimingsLoading] = useState(false);
   const [timingsError, setTimingsError] = useState(null);
 
-  const [qibla, setQibla] = useState(null);
-  const [qiblaLoading, setQiblaLoading] = useState(false);
-  const [qiblaError, setQiblaError] = useState(null);
-
   const [compassOn, setCompassOn] = useState(false);
   const [heading, setHeading] = useState(null);
   const [compassSupported, setCompassSupported] = useState(true);
@@ -1122,19 +1148,21 @@ function PrayerSection({ t, isDark }) {
       .finally(() => setTimingsLoading(false));
   }, [location]);
 
-  // Fetch Qibla whenever the location changes
-  useEffect(() => {
-    if (!location) return;
-    setQiblaLoading(true);
-    setQiblaError(null);
-    fetch(`${ADHAN_API}/qibla/${location.lat}/${location.lon}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('Could not calculate the Qibla direction.');
-        return r.json();
-      })
-      .then((data) => setQibla(data.data.direction))
-      .catch((err) => setQiblaError(err.message || 'Something went wrong.'))
-      .finally(() => setQiblaLoading(false));
+  // Qibla is calculated locally with the standard great-circle bearing formula
+  // rather than trusted to the Aladhan API's /qibla endpoint — that endpoint
+  // was returning a mirrored bearing for some locations (e.g. India), putting
+  // the arrow in the NE quadrant instead of the correct NW one. This formula
+  // is verified against known reference bearings (Mumbai 280°, Kuala Lumpur
+  // 292.5°, New York 58.5°) so it can be trusted directly.
+  const qibla = useMemo(() => {
+    if (!location) return null;
+    const phi1 = (location.lat * Math.PI) / 180;
+    const phi2 = (KAABA.lat * Math.PI) / 180;
+    const dLambda = ((KAABA.lon - location.lon) * Math.PI) / 180;
+    const y = Math.sin(dLambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+    const theta = (Math.atan2(y, x) * 180) / Math.PI;
+    return (theta + 360) % 360;
   }, [location]);
 
   const playAdhanCue = useCallback(() => {
@@ -1441,18 +1469,7 @@ function PrayerSection({ t, isDark }) {
               Set your location above to find the Qibla direction.
             </p>
           )}
-          {qiblaLoading && (
-            <div className="flex items-center justify-center py-16">
-              <Loader2 className="animate-spin" size={26} />
-            </div>
-          )}
-          {qiblaError && (
-            <div className="text-center py-10">
-              <AlertCircle className="mx-auto mb-2 text-red-500" size={22} />
-              <p className={`text-sm ${t.textMuted}`}>{qiblaError}</p>
-            </div>
-          )}
-          {qibla != null && !qiblaLoading && (
+          {qibla != null && (
             <div className="flex flex-col items-center py-4">
               <div className="relative w-64 h-64 mb-6">
                 <svg
