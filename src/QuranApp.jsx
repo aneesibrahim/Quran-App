@@ -25,7 +25,11 @@ import {
  */
 
 const API_BASE = 'https://api.alquran.cloud/v1';
-const EDITIONS = 'quran-uthmani,ml.abdulhameed,en.transliteration,ar.alafasy';
+const TEXT_EDITIONS = 'quran-uthmani,ml.abdulhameed,en.transliteration';
+const DEFAULT_RECITER = 'ar.alafasy';
+function buildEditions(reciter) {
+  return `${TEXT_EDITIONS},${reciter || DEFAULT_RECITER}`;
+}
 
 const ADHAN_API = 'https://api.aladhan.com/v1';
 const PRAYER_METHOD = 2; // Islamic Society of North America (ISNA); change if a different convention is preferred
@@ -38,6 +42,7 @@ const LS_PRAYER_LOCATION = 'quran_reader_prayer_location_v1';
 const LS_REMINDERS = 'quran_reader_prayer_reminders_v1';
 const LS_READ_LOG = 'quran_reader_read_log_v1';
 const LS_KHATMAH = 'quran_reader_khatmah_v1';
+const LS_RECITER = 'quran_reader_reciter_v1';
 
 // Total ayahs in the Quran, Uthmani numbering — used to calculate Khatmah
 // (completion) pacing and overall reading progress percentage.
@@ -265,6 +270,27 @@ export default function QuranApp() {
   const [ayahsLoading, setAyahsLoading] = useState(false);
   const [ayahsError, setAyahsError] = useState(null);
 
+  const [reciter, setReciter] = useState(() => localStorage.getItem(LS_RECITER) || DEFAULT_RECITER);
+  const [reciterList, setReciterList] = useState([]);
+  const [reciterListLoading, setReciterListLoading] = useState(true);
+  const [showReciterPicker, setShowReciterPicker] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(LS_RECITER, reciter);
+  }, [reciter]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/edition/format/audio`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
+      .then((data) => {
+        const arabic = (data.data || []).filter((e) => e.language === 'ar');
+        arabic.sort((a, b) => a.englishName.localeCompare(b.englishName));
+        setReciterList(arabic);
+      })
+      .catch(() => setReciterList([]))
+      .finally(() => setReciterListLoading(false));
+  }, []);
+
   // ---------------- UI ----------------
   const [query, setQuery] = useState('');
   const [mobileView, setMobileView] = useState('list'); // 'list' | 'reader'
@@ -353,49 +379,52 @@ export default function QuranApp() {
   }, [fetchSurahList]);
 
   // ---------------- Fetch: Ayahs for a Surah ----------------
-  const fetchAyahs = useCallback((num) => {
-    const myId = ++requestIdRef.current;
-    setAyahsLoading(true);
-    setAyahsError(null);
-    setAyahs([]);
-    setSurahMeta(null);
-    setCurrentAyahIdx(-1);
-    setIsPlaying(false);
+  const fetchAyahs = useCallback(
+    (num) => {
+      const myId = ++requestIdRef.current;
+      setAyahsLoading(true);
+      setAyahsError(null);
+      setAyahs([]);
+      setSurahMeta(null);
+      setCurrentAyahIdx(-1);
+      setIsPlaying(false);
 
-    fetch(`${API_BASE}/surah/${num}/editions/${EDITIONS}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('Could not load this Surah. Please try again.');
-        return r.json();
-      })
-      .then((data) => {
-        if (myId !== requestIdRef.current) return;
-        const [arabicEd, malayalamEd, translitEd, audioEd] = data.data;
-        const merged = arabicEd.ayahs.map((a, i) => ({
-          globalNumber: a.number,
-          numberInSurah: a.numberInSurah,
-          arabic: a.text,
-          translation: malayalamEd.ayahs[i]?.text || '',
-          transliteration: translitEd.ayahs[i]?.text || '',
-          audioUrl: audioEd.ayahs[i]?.audio || '',
-        }));
-        setAyahs(merged);
-        setSurahMeta({
-          number: arabicEd.number,
-          name: arabicEd.name,
-          englishName: arabicEd.englishName,
-          englishNameTranslation: arabicEd.englishNameTranslation,
-          revelationType: arabicEd.revelationType,
-          numberOfAyahs: arabicEd.numberOfAyahs,
+      fetch(`${API_BASE}/surah/${num}/editions/${buildEditions(reciter)}`)
+        .then((r) => {
+          if (!r.ok) throw new Error('Could not load this Surah. Please try again.');
+          return r.json();
+        })
+        .then((data) => {
+          if (myId !== requestIdRef.current) return;
+          const [arabicEd, malayalamEd, translitEd, audioEd] = data.data;
+          const merged = arabicEd.ayahs.map((a, i) => ({
+            globalNumber: a.number,
+            numberInSurah: a.numberInSurah,
+            arabic: a.text,
+            translation: malayalamEd.ayahs[i]?.text || '',
+            transliteration: translitEd.ayahs[i]?.text || '',
+            audioUrl: audioEd.ayahs[i]?.audio || '',
+          }));
+          setAyahs(merged);
+          setSurahMeta({
+            number: arabicEd.number,
+            name: arabicEd.name,
+            englishName: arabicEd.englishName,
+            englishNameTranslation: arabicEd.englishNameTranslation,
+            revelationType: arabicEd.revelationType,
+            numberOfAyahs: arabicEd.numberOfAyahs,
+          });
+        })
+        .catch((err) => {
+          if (myId !== requestIdRef.current) return;
+          setAyahsError(err.message || 'Something went wrong.');
+        })
+        .finally(() => {
+          if (myId === requestIdRef.current) setAyahsLoading(false);
         });
-      })
-      .catch((err) => {
-        if (myId !== requestIdRef.current) return;
-        setAyahsError(err.message || 'Something went wrong.');
-      })
-      .finally(() => {
-        if (myId === requestIdRef.current) setAyahsLoading(false);
-      });
-  }, []);
+    },
+    [reciter]
+  );
 
   useEffect(() => {
     if (selectedSurah) fetchAyahs(selectedSurah);
@@ -1108,12 +1137,47 @@ export default function QuranApp() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 relative">
                     <div className="text-sm font-medium truncate">
                       {surahMeta?.englishName}
                       {currentAyahIdx >= 0 ? ` · Ayah ${ayahs[currentAyahIdx]?.numberInSurah}` : ''}
                     </div>
-                    <div className={`text-xs ${t.textMuted} truncate`}>Reciter: Mishary Rashid Alafasy</div>
+                    <button
+                      onClick={() => setShowReciterPicker((v) => !v)}
+                      className={`flex items-center gap-1 text-xs ${t.textMuted} truncate hover:underline`}
+                    >
+                      Reciter:{' '}
+                      {reciterList.find((r) => r.identifier === reciter)?.englishName || 'Mishary Rashid Alafasy'}
+                      <ChevronDown size={11} className={`shrink-0 transition-transform ${showReciterPicker ? 'rotate-180' : ''}`} />
+                    </button>
+                    {showReciterPicker && (
+                      <div
+                        className={`absolute bottom-full left-0 mb-2 w-64 max-h-72 overflow-y-auto rounded-xl border shadow-lg z-50 ${t.cardBg} ${t.headerBg}`}
+                      >
+                        {reciterListLoading ? (
+                          <div className="p-4 flex justify-center">
+                            <Loader2 className="animate-spin" size={18} />
+                          </div>
+                        ) : reciterList.length === 0 ? (
+                          <p className={`p-3 text-xs ${t.textMuted}`}>Could not load the reciter list.</p>
+                        ) : (
+                          reciterList.map((r) => (
+                            <button
+                              key={r.identifier}
+                              onClick={() => {
+                                setReciter(r.identifier);
+                                setShowReciterPicker(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-sm ${t.hoverSoft} ${
+                                r.identifier === reciter ? `${t.accent} font-medium` : ''
+                              }`}
+                            >
+                              {r.englishName}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
@@ -1819,7 +1883,7 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, o
     const globalNumber = (dayOfYear % TOTAL_AYAHS) + 1;
     setAyahOfDayLoading(true);
     setAyahOfDayError(null);
-    fetch(`${API_BASE}/ayah/${globalNumber}/editions/${EDITIONS}`)
+    fetch(`${API_BASE}/ayah/${globalNumber}/editions/${TEXT_EDITIONS}`)
       .then((r) => {
         if (!r.ok) throw new Error("Could not load today's Ayah.");
         return r.json();
