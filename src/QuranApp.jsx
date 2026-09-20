@@ -4,6 +4,7 @@ import {
   Bookmark, BookmarkCheck, Copy, Check, Moon, Sun,
   Loader2, BookOpen, AlertCircle, Clock, Compass, MapPin,
   ChevronDown, Droplets, Info, Volume2, Bell, BellOff,
+  Target, Flame, Sparkles, Smartphone, X,
 } from 'lucide-react';
 
 /**
@@ -35,6 +36,22 @@ const LS_LAST_READ = 'quran_reader_last_read_v1';
 const LS_THEME = 'quran_reader_theme_v1';
 const LS_PRAYER_LOCATION = 'quran_reader_prayer_location_v1';
 const LS_REMINDERS = 'quran_reader_prayer_reminders_v1';
+const LS_READ_LOG = 'quran_reader_read_log_v1';
+const LS_KHATMAH = 'quran_reader_khatmah_v1';
+
+// Total ayahs in the Quran, Uthmani numbering — used to calculate Khatmah
+// (completion) pacing and overall reading progress percentage.
+const TOTAL_AYAHS = 6236;
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(dateKey, days) {
+  const d = new Date(dateKey);
+  d.setDate(d.getDate() + days);
+  return d;
+}
 
 // Optional: point this at an Adhan (call to prayer) recording you have the
 // rights to use — e.g. a file you add to your project's `public/` folder
@@ -234,7 +251,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'progress'
 
   // ---------------- Surah list ----------------
   const [surahList, setSurahList] = useState([]);
@@ -270,6 +287,14 @@ export default function QuranApp() {
   // ---------------- Persisted state ----------------
   const [bookmarks, setBookmarks] = useState(() => loadJSON(LS_BOOKMARKS, {}));
   const [lastRead, setLastRead] = useState(() => loadJSON(LS_LAST_READ, null));
+
+  // { visited: { [globalAyahNumber]: 'YYYY-MM-DD' } } — every ayah is recorded
+  // once, on the date it was first seen. This drives Khatmah progress and the
+  // habit-streak dashboard, without needing a "mark as read" button: it's
+  // updated passively as ayahs scroll into view (see the IntersectionObserver
+  // effect below) and whenever one is played.
+  const [readLog, setReadLog] = useState(() => loadJSON(LS_READ_LOG, { visited: {} }));
+  const [khatmah, setKhatmah] = useState(() => loadJSON(LS_KHATMAH, null)); // { targetDate, createdAt, startCount }
 
   // ---------------- Audio ----------------
   const [currentAyahIdx, setCurrentAyahIdx] = useState(-1);
@@ -376,6 +401,105 @@ export default function QuranApp() {
     if (selectedSurah) fetchAyahs(selectedSurah);
   }, [selectedSurah, fetchAyahs]);
 
+  // ---------------- Persistence ----------------
+  useEffect(() => {
+    localStorage.setItem(LS_BOOKMARKS, JSON.stringify(bookmarks));
+  }, [bookmarks]);
+
+  const markAyahRead = useCallback((globalNumber) => {
+    setReadLog((prev) => {
+      if (prev.visited[globalNumber]) return prev; // already counted — skip the write
+      return { visited: { ...prev.visited, [globalNumber]: todayKey() } };
+    });
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(LS_READ_LOG, JSON.stringify(readLog));
+  }, [readLog]);
+
+  useEffect(() => {
+    if (khatmah) localStorage.setItem(LS_KHATMAH, JSON.stringify(khatmah));
+    else localStorage.removeItem(LS_KHATMAH);
+  }, [khatmah]);
+
+  // Passively record which ayahs have actually been read: whenever an ayah
+  // card is more than half visible on screen for a moment, it's logged. This
+  // needs no "mark as read" button and naturally follows normal scrolling —
+  // playing an ayah's audio also scrolls it into view, so listening counts too.
+  useEffect(() => {
+    if (!ayahs.length) return;
+    const seen = new Set();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+            const gNum = Number(entry.target.dataset.globalNumber);
+            if (gNum && !seen.has(gNum)) {
+              seen.add(gNum);
+              markAyahRead(gNum);
+            }
+          }
+        });
+      },
+      { threshold: [0.5] }
+    );
+    Object.values(ayahRefs.current).forEach((el) => {
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, [ayahs, markAyahRead]);
+
+  const readingStats = useMemo(() => {
+    const visited = readLog.visited || {};
+    const totalRead = Object.keys(visited).length;
+    const byDate = {};
+    Object.values(visited).forEach((date) => {
+      byDate[date] = (byDate[date] || 0) + 1;
+    });
+    let streak = 0;
+    let cursor = todayKey();
+    while (byDate[cursor] > 0) {
+      streak += 1;
+      cursor = addDays(cursor, -1).toISOString().slice(0, 10);
+    }
+    const last7 = [];
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = addDays(todayKey(), -i);
+      const key = d.toISOString().slice(0, 10);
+      last7.push({ date: key, count: byDate[key] || 0, label: d.toLocaleDateString(undefined, { weekday: 'short' }) });
+    }
+    return {
+      totalRead,
+      byDate,
+      streak,
+      last7,
+      percent: Math.min(100, (totalRead / TOTAL_AYAHS) * 100),
+    };
+  }, [readLog]);
+
+  const khatmahStats = useMemo(() => {
+    if (!khatmah) return null;
+    const today = todayKey();
+    const daysTotal = Math.max(1, Math.round((new Date(khatmah.targetDate) - new Date(khatmah.createdAt)) / 86400000));
+    const daysLeft = Math.max(0, Math.ceil((new Date(khatmah.targetDate) - new Date(today)) / 86400000));
+    const ayahsRemaining = Math.max(0, TOTAL_AYAHS - readingStats.totalRead);
+    const dailyTarget = daysLeft > 0 ? Math.ceil(ayahsRemaining / daysLeft) : ayahsRemaining;
+    const daysElapsed = Math.max(0, daysTotal - daysLeft);
+    const expectedByNow = khatmah.startCount + ((TOTAL_AYAHS - khatmah.startCount) * daysElapsed) / daysTotal;
+    const readToday = readingStats.byDate[today] || 0;
+    return {
+      daysLeft,
+      daysTotal,
+      dailyTarget,
+      ayahsRemaining,
+      readToday,
+      onPace: readingStats.totalRead >= expectedByNow,
+      behindBy: Math.max(0, Math.round(expectedByNow - readingStats.totalRead)),
+      completed: readingStats.totalRead >= TOTAL_AYAHS,
+      overdue: daysLeft <= 0 && readingStats.totalRead < TOTAL_AYAHS,
+    };
+  }, [khatmah, readingStats]);
+
   // Jump to a specific ayah once its Surah has finished loading (from bookmarks / last read)
   useEffect(() => {
     if (!ayahsLoading && ayahs.length && pendingJumpRef.current) {
@@ -392,11 +516,6 @@ export default function QuranApp() {
       }
     }
   }, [ayahsLoading, ayahs]);
-
-  // ---------------- Persistence ----------------
-  useEffect(() => {
-    localStorage.setItem(LS_BOOKMARKS, JSON.stringify(bookmarks));
-  }, [bookmarks]);
 
   useEffect(() => {
     if (lastRead) localStorage.setItem(LS_LAST_READ, JSON.stringify(lastRead));
@@ -645,6 +764,14 @@ export default function QuranApp() {
               }`}
             >
               Prayer
+            </button>
+            <button
+              onClick={() => setSection('progress')}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                section === 'progress' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+              }`}
+            >
+              Progress
             </button>
           </div>
 
@@ -901,6 +1028,7 @@ export default function QuranApp() {
                         ref={(el) => {
                           ayahRefs.current[ayah.globalNumber] = el;
                         }}
+                        data-global-number={ayah.globalNumber}
                         className={`rounded-2xl border p-5 transition ${isActive ? t.cardActive : t.cardBg}`}
                       >
                         <div className="flex items-center justify-between mb-4">
@@ -1025,8 +1153,17 @@ export default function QuranApp() {
             className="hidden"
           />
         </>
-      ) : (
+      ) : section === 'prayer' ? (
         <PrayerSection t={t} isDark={isDark} />
+      ) : (
+        <ProgressSection
+          t={t}
+          readingStats={readingStats}
+          khatmah={khatmah}
+          setKhatmah={setKhatmah}
+          khatmahStats={khatmahStats}
+          onOpenAyah={(surahNum, ayahNum) => selectSurah(surahNum, ayahNum)}
+        />
       )}
     </div>
   );
@@ -1651,6 +1788,266 @@ function PrayerSection({ t, isDark }) {
               </div>
             )}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Progress: Khatmah planner & habit dashboard ==================== */
+
+const KHATMAH_PRESETS = [
+  { label: 'Ramadan (30 days)', days: 30 },
+  { label: '60 days', days: 60 },
+  { label: '90 days', days: 90 },
+  { label: '1 year', days: 365 },
+];
+
+function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, onOpenAyah }) {
+  const [customDate, setCustomDate] = useState('');
+  const [dismissedWidgetNote, setDismissedWidgetNote] = useState(false);
+
+  const [ayahOfDay, setAyahOfDay] = useState(null);
+  const [ayahOfDayLoading, setAyahOfDayLoading] = useState(true);
+  const [ayahOfDayError, setAyahOfDayError] = useState(null);
+
+  // Deterministic pick: same ayah all day for everyone, changes daily.
+  useEffect(() => {
+    const dayOfYear = Math.floor(
+      (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+    );
+    const globalNumber = (dayOfYear % TOTAL_AYAHS) + 1;
+    setAyahOfDayLoading(true);
+    setAyahOfDayError(null);
+    fetch(`${API_BASE}/ayah/${globalNumber}/editions/${EDITIONS}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Could not load today's Ayah.");
+        return r.json();
+      })
+      .then((data) => {
+        const [arabicEd, malayalamEd, translitEd] = data.data;
+        setAyahOfDay({
+          arabic: arabicEd.text,
+          translation: malayalamEd.text,
+          transliteration: translitEd.text,
+          surahName: arabicEd.surah.englishName,
+          surahNumber: arabicEd.surah.number,
+          numberInSurah: arabicEd.numberInSurah,
+        });
+      })
+      .catch((err) => setAyahOfDayError(err.message || 'Something went wrong.'))
+      .finally(() => setAyahOfDayLoading(false));
+  }, []);
+
+  const startPlan = (days) => {
+    const created = todayKey();
+    const target = addDays(created, days).toISOString().slice(0, 10);
+    setKhatmah({ createdAt: created, targetDate: target, startCount: readingStats.totalRead });
+  };
+
+  const startCustomPlan = (e) => {
+    e.preventDefault();
+    if (!customDate) return;
+    setKhatmah({ createdAt: todayKey(), targetDate: customDate, startCount: readingStats.totalRead });
+  };
+
+  const maxWeekCount = Math.max(1, ...readingStats.last7.map((d) => d.count));
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16 space-y-5">
+      {/* Overview stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className={`rounded-2xl border p-4 text-center ${t.cardBg}`}>
+          <div className={`text-2xl font-semibold ${t.accent}`}>{readingStats.streak}</div>
+          <div className={`text-xs ${t.textMuted} flex items-center justify-center gap-1 mt-1`}>
+            <Flame size={12} /> Day streak
+          </div>
+        </div>
+        <div className={`rounded-2xl border p-4 text-center ${t.cardBg}`}>
+          <div className="text-2xl font-semibold">{readingStats.totalRead.toLocaleString()}</div>
+          <div className={`text-xs ${t.textMuted} mt-1`}>Ayahs read</div>
+        </div>
+        <div className={`rounded-2xl border p-4 text-center ${t.cardBg}`}>
+          <div className="text-2xl font-semibold">{readingStats.percent.toFixed(1)}%</div>
+          <div className={`text-xs ${t.textMuted} mt-1`}>of the Qur'an</div>
+        </div>
+      </div>
+
+      {/* Weekly activity chart */}
+      <div className={`rounded-2xl border p-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-3">This week</h3>
+        <div className="flex items-end justify-between gap-2 h-28">
+          {readingStats.last7.map((d) => (
+            <div key={d.date} className="flex-1 flex flex-col items-center gap-1.5">
+              <div className="w-full flex-1 flex items-end">
+                <div
+                  className={`w-full rounded-t-md ${d.count > 0 ? t.accentBg : `${t.divider} border`}`}
+                  style={{ height: `${Math.max(4, (d.count / maxWeekCount) * 100)}%` }}
+                  title={`${d.count} ayahs`}
+                />
+              </div>
+              <span className={`text-[10px] ${t.textMuted}`}>{d.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Khatmah planner */}
+      <div className={`rounded-2xl border p-4 ${t.cardBg}`}>
+        <h3 className="flex items-center gap-2 text-sm font-semibold mb-3">
+          <Target size={16} className={t.accent} />
+          Khatmah Planner
+        </h3>
+
+        {!khatmah ? (
+          <>
+            <p className={`text-xs ${t.textMuted} mb-3 leading-relaxed`}>
+              Set a target completion date and get a daily reading target calculated automatically from where
+              you already are in the Qur'an.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {KHATMAH_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => startPlan(p.days)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={startCustomPlan} className="flex items-center gap-2">
+              <input
+                type="date"
+                value={customDate}
+                min={todayKey()}
+                onChange={(e) => setCustomDate(e.target.value)}
+                className={`flex-1 px-3 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+              />
+              <button type="submit" className={`text-xs px-3 py-1.5 rounded-lg ${t.accentBg} text-white shrink-0`}>
+                Set custom date
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            {khatmahStats.completed ? (
+              <div className="text-center py-4">
+                <div className="text-3xl mb-2">🎉</div>
+                <div className="text-lg font-semibold mb-1">Khatmah complete!</div>
+                <p className={`text-sm ${t.textMuted} mb-3`}>
+                  You've read every ayah in the Qur'an at least once. May it be accepted.
+                </p>
+                <button
+                  onClick={() => setKhatmah(null)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                >
+                  Start a new plan
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className={t.textMuted}>
+                    Target: {new Date(khatmah.targetDate).toLocaleDateString()}
+                  </span>
+                  <span className={t.textMuted}>{khatmahStats.daysLeft} days left</span>
+                </div>
+                <div className={`w-full h-2 rounded-full ${t.divider} border mb-3 overflow-hidden`}>
+                  <div
+                    className={`h-full ${t.accentBg}`}
+                    style={{ width: `${Math.min(100, readingStats.percent)}%` }}
+                  />
+                </div>
+                <div
+                  className={`rounded-xl border p-3 mb-3 text-center ${
+                    khatmahStats.overdue ? 'border-red-500/40 bg-red-500/10' : t.cardActive
+                  }`}
+                >
+                  {khatmahStats.overdue ? (
+                    <p className="text-sm">
+                      Target date has passed with {khatmahStats.ayahsRemaining.toLocaleString()} ayahs left. You
+                      can set a new target date below.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="text-xl font-semibold mb-0.5">{khatmahStats.dailyTarget} ayahs / day</div>
+                      <div className={`text-xs ${t.textMuted}`}>
+                        {khatmahStats.readToday} read today ·{' '}
+                        {khatmahStats.onPace
+                          ? 'on pace 🎯'
+                          : `${khatmahStats.behindBy} behind pace`}
+                      </div>
+                    </>
+                  )}
+                </div>
+                <button
+                  onClick={() => setKhatmah(null)}
+                  className={`w-full text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                >
+                  Cancel plan
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Ayah of the Day */}
+      <div className={`rounded-2xl border p-4 ${t.cardBg}`}>
+        <h3 className="flex items-center gap-2 text-sm font-semibold mb-3">
+          <Sparkles size={16} className={t.accent} />
+          Ayah of the Day
+        </h3>
+        {ayahOfDayLoading && (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="animate-spin" size={22} />
+          </div>
+        )}
+        {ayahOfDayError && <p className={`text-sm ${t.textMuted}`}>{ayahOfDayError}</p>}
+        {ayahOfDay && !ayahOfDayLoading && (
+          <>
+            <p className="font-arabic text-right text-2xl leading-relaxed mb-3" dir="rtl">
+              {ayahOfDay.arabic}
+            </p>
+            <p className={`text-sm italic ${t.textMuted} mb-2`}>{ayahOfDay.transliteration}</p>
+            <p className="font-malayalam text-base mb-3">{ayahOfDay.translation}</p>
+            <div className="flex items-center justify-between">
+              <span className={`text-xs ${t.textMuted}`}>
+                {ayahOfDay.surahName} · {ayahOfDay.surahNumber}:{ayahOfDay.numberInSurah}
+              </span>
+              <button
+                onClick={() => onOpenAyah(ayahOfDay.surahNumber, ayahOfDay.numberInSurah)}
+                className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+              >
+                Read in context
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Home-screen note (honest about what's and isn't possible) */}
+      {!dismissedWidgetNote && (
+        <div className={`rounded-2xl border p-4 ${t.cardBg} relative`}>
+          <button
+            onClick={() => setDismissedWidgetNote(true)}
+            className={`absolute top-3 right-3 p-1 rounded ${t.hoverSoft} ${t.textMuted}`}
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
+          <h3 className="flex items-center gap-2 text-sm font-semibold mb-2 pr-6">
+            <Smartphone size={16} className={t.accent} />
+            About home screen widgets
+          </h3>
+          <p className={`text-xs ${t.textMuted} leading-relaxed`}>
+            A live, interactive OS widget (the kind that sits on your home screen showing the Ayah of the Day
+            or a prayer countdown without opening the app) needs native code — iOS WidgetKit or an Android App
+            Widget — which is a separate project from this web app. What this page <em>can</em> do: from your
+            phone's browser menu, choose "Add to Home Screen" to get an app icon that opens straight to this
+            dashboard — the Ayah of the Day and next-prayer countdown are both one tap away from there.
+          </p>
         </div>
       )}
     </div>
