@@ -6,6 +6,7 @@ import {
   ChevronDown, Droplets, Info, Volume2, Bell, BellOff,
   Target, Flame, Sparkles, Smartphone, X,
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
+  Home, Shield, Users, Utensils, Star, MoreHorizontal,
 } from 'lucide-react';
 
 /**
@@ -91,7 +92,191 @@ const HARAKAT = [
   { mark: 'بٌ', name: 'Tanween Damm', sound: '"un" sound', translit: 'Bun' },
 ];
 
-// Total ayahs in the Quran, Uthmani numbering — used to calculate Khatmah
+const LS_DUA_FAVORITES = 'quran_reader_dua_favorites_v1';
+
+const DUA_CATEGORIES = [
+  { key: 'home', label: 'Home & Daily Life', icon: Home, color: 'sky' },
+  { key: 'sleep', label: 'Sleep & Waking', icon: Moon, color: 'indigo' },
+  { key: 'eating', label: 'Eating & Drinking', icon: Utensils, color: 'amber' },
+  { key: 'travel', label: 'Travel', icon: Compass, color: 'cyan' },
+  { key: 'protection', label: 'Protection & Comfort', icon: Shield, color: 'rose' },
+  { key: 'social', label: 'Social & Wellbeing', icon: Users, color: 'emerald' },
+];
+
+// A general collection of everyday duas following common practice, drawn
+// from widely published sources (e.g. Hisnul Muslim / "Fortress of the
+// Muslim"). Exact wording can vary slightly between narrations and
+// collections — treat this as a reliable everyday reference rather than an
+// exhaustive scholarly text.
+const DUAS = [
+  {
+    id: 'home-enter',
+    category: 'home',
+    title: 'Entering the home',
+    occasion: 'Said when stepping into your house',
+    arabic: 'اللَّهُمَّ إِنِّي أَسْأَلُكَ خَيْرَ الْمَوْلِجِ وَخَيْرَ الْمَخْرَجِ، بِسْمِ اللَّهِ وَلَجْنَا وَبِسْمِ اللَّهِ خَرَجْنَا وَعَلَى اللَّهِ رَبِّنَا تَوَكَّلْنَا',
+    translit: "Allahumma inni as'aluka khayral-mawliji wa khayral-makhraji, bismillahi walajna wa bismillahi kharajna wa 'ala Allahi Rabbina tawakkalna",
+    translation: 'O Allah, I ask You for the best entrance and the best exit; in the name of Allah we enter and in the name of Allah we leave, and upon Allah, our Lord, we place our trust.',
+  },
+  {
+    id: 'home-leave',
+    category: 'home',
+    title: 'Leaving the home',
+    occasion: 'Said when stepping out the door',
+    arabic: 'بِسْمِ اللَّهِ تَوَكَّلْتُ عَلَى اللَّهِ، وَلَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ',
+    translit: "Bismillahi tawakkaltu 'alallahi, wa la hawla wa la quwwata illa billah",
+    translation: 'In the name of Allah, I place my trust in Allah; there is no power and no strength except with Allah.',
+  },
+  {
+    id: 'home-bathroom-enter',
+    category: 'home',
+    title: 'Entering the bathroom',
+    occasion: 'Said before entering',
+    arabic: 'اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنَ الْخُبُثِ وَالْخَبَائِثِ',
+    translit: "Allahumma inni a'udhu bika minal-khubthi wal-khaba'ith",
+    translation: 'O Allah, I seek refuge in You from male and female unclean spirits.',
+  },
+  {
+    id: 'home-bathroom-leave',
+    category: 'home',
+    title: 'Leaving the bathroom',
+    occasion: 'Said after leaving',
+    arabic: 'غُفْرَانَكَ',
+    translit: 'Ghufranak',
+    translation: 'I seek Your forgiveness.',
+  },
+  {
+    id: 'sleep-before',
+    category: 'sleep',
+    title: 'Before sleeping',
+    occasion: 'Said lying down to sleep',
+    arabic: 'بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا',
+    translit: 'Bismika Allahumma amutu wa ahya',
+    translation: 'In Your name, O Allah, I die and I live.',
+  },
+  {
+    id: 'sleep-waking',
+    category: 'sleep',
+    title: 'Upon waking up',
+    occasion: 'Said right after waking',
+    arabic: 'الْحَمْدُ لِلَّهِ الَّذِي أَحْيَانَا بَعْدَ مَا أَمَاتَنَا وَإِلَيْهِ النُّشُورُ',
+    translit: "Alhamdu lillahil-ladhi ahyana ba'da ma amatana wa ilayhin-nushur",
+    translation: 'Praise be to Allah who gave us life after having taken it from us, and unto Him is the resurrection.',
+  },
+  {
+    id: 'eating-before',
+    category: 'eating',
+    title: 'Before eating',
+    occasion: 'Said before starting a meal',
+    arabic: 'بِسْمِ اللَّهِ',
+    translit: 'Bismillah',
+    translation: 'In the name of Allah.',
+    note: 'If you forget to say it at the start, "Bismillahi awwalahu wa akhirahu" ("In the name of Allah at its start and its end") is said upon remembering.',
+  },
+  {
+    id: 'eating-after',
+    category: 'eating',
+    title: 'After eating',
+    occasion: 'Said once finished',
+    arabic: 'الْحَمْدُ لِلَّهِ الَّذِي أَطْعَمَنِي هَذَا وَرَزَقَنِيهِ مِنْ غَيْرِ حَوْلٍ مِنِّي وَلَا قُوَّةٍ',
+    translit: 'Alhamdu lillahil-ladhi at-amani hadha wa razaqanihi min ghayri hawlin minni wa la quwwah',
+    translation: 'Praise be to Allah who fed me this and provided it for me without any power or might on my part.',
+  },
+  {
+    id: 'travel-start',
+    category: 'travel',
+    title: 'Starting a journey',
+    occasion: 'Said when setting off, e.g. boarding a vehicle',
+    arabic: 'اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، سُبْحَانَ الَّذِي سَخَّرَ لَنَا هَذَا وَمَا كُنَّا لَهُ مُقْرِنِينَ وَإِنَّا إِلَى رَبِّنَا لَمُنْقَلِبُونَ',
+    translit: 'Allahu Akbar, Allahu Akbar, Allahu Akbar. Subhanal-ladhi sakhkhara lana hadha wa ma kunna lahu muqrinin, wa inna ila Rabbina lamunqalibun',
+    translation: 'Allah is the Greatest (×3). Glory to Him who has placed this at our service, for we ourselves could not have done so, and to our Lord we will surely return.',
+    note: "Drawn from Qur'an 43:13–14.",
+  },
+  {
+    id: 'travel-return',
+    category: 'travel',
+    title: 'Returning from a journey',
+    occasion: "Said on the way home, added to the travel dua",
+    arabic: 'آيِبُونَ تَائِبُونَ عَابِدُونَ لِرَبِّنَا حَامِدُونَ',
+    translit: "Ayibuna ta'ibuna 'abiduna li-Rabbina hamidun",
+    translation: 'We return, repentant, worshipping, and praising our Lord.',
+  },
+  {
+    id: 'protection-distress',
+    category: 'protection',
+    title: 'In times of distress',
+    occasion: 'Known as the dua of Prophet Yunus (Jonah)',
+    arabic: 'لَا إِلَٰهَ إِلَّا أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ',
+    translit: 'La ilaha illa anta subhanaka inni kuntu minaz-zalimin',
+    translation: 'There is no god but You, glory be to You; indeed I was among the wrongdoers.',
+    note: "From Qur'an 21:87.",
+  },
+  {
+    id: 'protection-daily',
+    category: 'protection',
+    title: 'For protection, morning & evening',
+    occasion: 'Recited three times, morning and evening',
+    arabic: 'بِسْمِ اللَّهِ الَّذِي لَا يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الْأَرْضِ وَلَا فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ',
+    translit: "Bismillahil-ladhi la yadurru ma'asmihi shay'un fil-ardi wa la fis-sama'i wa Huwas-Sami'ul-'Alim",
+    translation: 'In the name of Allah, with whose name nothing on earth or in the heavens can cause harm, and He is the All-Hearing, All-Knowing.',
+  },
+  {
+    id: 'protection-fear',
+    category: 'protection',
+    title: 'In fear or danger',
+    occasion: 'Said when facing a frightening situation',
+    arabic: 'حَسْبُنَا اللَّهُ وَنِعْمَ الْوَكِيلُ',
+    translit: "Hasbunallahu wa ni'mal-Wakil",
+    translation: 'Allah is sufficient for us, and He is the best Disposer of affairs.',
+    note: "From Qur'an 3:173.",
+  },
+  {
+    id: 'social-parents',
+    category: 'social',
+    title: 'For parents',
+    occasion: 'A short dua for one\u2019s mother and father',
+    arabic: 'رَبِّ ارْحَمْهُمَا كَمَا رَبَّيَانِي صَغِيرًا',
+    translit: 'Rabbi-rhamhuma kama rabbayani saghira',
+    translation: 'My Lord, have mercy upon them as they raised me when I was small.',
+    note: "From Qur'an 17:24.",
+  },
+  {
+    id: 'social-sneeze',
+    category: 'social',
+    title: 'Sneezing',
+    occasion: 'An exchange between the person who sneezes and those who hear it',
+    arabic: 'الْحَمْدُ لِلَّهِ — يَرْحَمُكَ اللَّهُ — يَهْدِيكُمُ اللَّهُ وَيُصْلِحُ بَالَكُمْ',
+    translit: 'Alhamdulillah — Yarhamukallah — Yahdikumullahu wa yuslihu balakum',
+    translation: 'The sneezer says "Praise be to Allah." Those who hear reply "May Allah have mercy on you." The sneezer then responds, "May Allah guide you and set your affairs right."',
+  },
+  {
+    id: 'social-sick',
+    category: 'social',
+    title: 'Visiting someone sick',
+    occasion: 'Said to comfort them',
+    arabic: 'لَا بَأْسَ، طَهُورٌ إِنْ شَاءَ اللَّهُ',
+    translit: 'La ba-sa, tahurun in sha Allah',
+    translation: 'No harm — it will be a purification, if Allah wills.',
+  },
+  {
+    id: 'social-pleasing',
+    category: 'social',
+    title: 'Seeing something pleasing',
+    occasion: 'Said upon good news or a pleasant sight',
+    arabic: 'الْحَمْدُ لِلَّهِ الَّذِي بِنِعْمَتِهِ تَتِمُّ الصَّالِحَاتُ',
+    translit: "Alhamdu lillahil-ladhi bini'matihi tatimmus-salihat",
+    translation: 'Praise be to Allah, by whose grace good things are completed.',
+  },
+  {
+    id: 'social-displeasing',
+    category: 'social',
+    title: 'Seeing something troubling',
+    occasion: 'Said upon hearing unwelcome news',
+    arabic: 'الْحَمْدُ لِلَّهِ عَلَى كُلِّ حَالٍ',
+    translit: "Alhamdu lillahi 'ala kulli hal",
+    translation: 'Praise be to Allah in every circumstance.',
+  },
+];
 // (completion) pacing and overall reading progress percentage.
 const TOTAL_AYAHS = 6236;
 
@@ -303,7 +488,8 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'progress' | 'learn'
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // ---------------- Surah list ----------------
   const [surahList, setSurahList] = useState([]);
@@ -916,25 +1102,61 @@ export default function QuranApp() {
               <span className="hidden sm:inline">Prayer</span>
             </button>
             <button
-              onClick={() => setSection('progress')}
+              onClick={() => setSection('duas')}
               className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                section === 'progress' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                section === 'duas' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
-              title="Progress"
+              title="Duas"
             >
-              <Target size={14} />
-              <span className="hidden sm:inline">Progress</span>
+              <Sparkles size={14} />
+              <span className="hidden sm:inline">Duas</span>
             </button>
-            <button
-              onClick={() => setSection('learn')}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                section === 'learn' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
-              }`}
-              title="Learn"
-            >
-              <GraduationCap size={14} />
-              <span className="hidden sm:inline">Learn</span>
-            </button>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowMoreMenu((v) => !v)}
+                className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                  section === 'progress' || section === 'learn'
+                    ? `${t.accentBg} text-white`
+                    : `${t.textMuted} ${t.hoverSoft}`
+                }`}
+                title="More"
+                aria-label="More sections"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+              {showMoreMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
+                  <div
+                    className={`absolute top-full right-0 mt-2 w-44 rounded-xl border shadow-lg z-50 overflow-hidden ${t.cardBg} ${t.headerBg}`}
+                  >
+                    <button
+                      onClick={() => {
+                        setSection('progress');
+                        setShowMoreMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left ${t.hoverSoft} ${
+                        section === 'progress' ? t.accent : ''
+                      }`}
+                    >
+                      <Target size={15} /> Progress
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSection('learn');
+                        setShowMoreMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left ${t.hoverSoft} ${
+                        section === 'learn' ? t.accent : ''
+                      }`}
+                    >
+                      <GraduationCap size={15} /> Learn
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {section === 'quran' ? (
@@ -1519,6 +1741,8 @@ export default function QuranApp() {
         </>
       ) : section === 'prayer' ? (
         <PrayerSection t={t} isDark={isDark} />
+      ) : section === 'duas' ? (
+        <DuasSection t={t} isDark={isDark} />
       ) : section === 'progress' ? (
         <ProgressSection
           t={t}
@@ -2866,6 +3090,211 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
               Next question
             </button>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Duas: everyday occasion-based supplications ==================== */
+
+// Full literal Tailwind class strings per category color — constructing these
+// dynamically (e.g. `bg-${color}-950/40`) would prevent Tailwind's JIT
+// scanner from finding and including them in the build, so each is spelled
+// out explicitly here instead.
+const DUA_COLOR_STYLES = {
+  sky: {
+    dark: 'bg-sky-950/40 text-sky-400 border border-sky-900/50',
+    light: 'bg-sky-50 text-sky-700 border border-sky-200',
+  },
+  indigo: {
+    dark: 'bg-indigo-950/40 text-indigo-400 border border-indigo-900/50',
+    light: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
+  },
+  amber: {
+    dark: 'bg-amber-950/40 text-amber-400 border border-amber-900/50',
+    light: 'bg-amber-50 text-amber-700 border border-amber-200',
+  },
+  cyan: {
+    dark: 'bg-cyan-950/40 text-cyan-400 border border-cyan-900/50',
+    light: 'bg-cyan-50 text-cyan-700 border border-cyan-200',
+  },
+  rose: {
+    dark: 'bg-rose-950/40 text-rose-400 border border-rose-900/50',
+    light: 'bg-rose-50 text-rose-700 border border-rose-200',
+  },
+  emerald: {
+    dark: 'bg-emerald-950/40 text-emerald-400 border border-emerald-900/50',
+    light: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  },
+};
+
+function DuasSection({ t, isDark }) {
+  const [query, setQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+  const [copiedId, setCopiedId] = useState(null);
+  const [favorites, setFavorites] = useState(() => loadJSON(LS_DUA_FAVORITES, {}));
+
+  useEffect(() => {
+    localStorage.setItem(LS_DUA_FAVORITES, JSON.stringify(favorites));
+  }, [favorites]);
+
+  const toggleFavorite = (id) => {
+    setFavorites((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+
+  const copyDua = (dua) => {
+    const text = `${dua.arabic}\n\n${dua.translation}\n\n— ${dua.title}`;
+    navigator.clipboard
+      ?.writeText(text)
+      .then(() => {
+        setCopiedId(dua.id);
+        setTimeout(() => setCopiedId((id) => (id === dua.id ? null : id)), 1800);
+      })
+      .catch(() => {});
+  };
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return DUAS.filter((d) => {
+      if (showFavoritesOnly && !favorites[d.id]) return false;
+      if (activeCategory !== 'all' && d.category !== activeCategory) return false;
+      if (!q) return true;
+      return (
+        d.title.toLowerCase().includes(q) ||
+        d.occasion.toLowerCase().includes(q) ||
+        d.translation.toLowerCase().includes(q)
+      );
+    });
+  }, [query, activeCategory, showFavoritesOnly, favorites]);
+
+  const favoriteCount = Object.keys(favorites).length;
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16">
+      <div className="text-center mb-6">
+        <h1 className="text-xl font-semibold mb-1">Everyday Duas</h1>
+        <p className={`text-sm ${t.textMuted} max-w-md mx-auto`}>
+          Short supplications for daily moments — entering the home, before sleep, setting off on a journey, and
+          more.
+        </p>
+      </div>
+
+      <div className="relative mb-4">
+        <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${t.textFaint}`} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by occasion or keyword…"
+          className={`w-full pl-9 pr-3 py-2.5 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+        />
+      </div>
+
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 mb-4 -mx-1 px-1" style={{ scrollbarWidth: 'thin' }}>
+        <button
+          onClick={() => setActiveCategory('all')}
+          className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+            activeCategory === 'all' ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+          }`}
+        >
+          All
+        </button>
+        {DUA_CATEGORIES.map((c) => {
+          const Icon = c.icon;
+          return (
+            <button
+              key={c.key}
+              onClick={() => setActiveCategory(c.key)}
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                activeCategory === c.key
+                  ? `${t.accentBg} text-white border-transparent`
+                  : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+              }`}
+            >
+              <Icon size={12} />
+              {c.label}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => setShowFavoritesOnly((v) => !v)}
+          className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+            showFavoritesOnly ? 'bg-amber-500 text-white border-transparent' : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+          }`}
+        >
+          <Star size={12} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
+          Favorites{favoriteCount > 0 ? ` (${favoriteCount})` : ''}
+        </button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="text-center py-16">
+          <p className={`text-sm ${t.textMuted}`}>
+            {showFavoritesOnly
+              ? "You haven't starred any duas yet — tap the star on one to save it here."
+              : 'No duas match your search.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((dua) => {
+            const cat = DUA_CATEGORIES.find((c) => c.key === dua.category);
+            const Icon = cat.icon;
+            const isOpen = expanded === dua.id;
+            const isFav = !!favorites[dua.id];
+            const badgeClass = DUA_COLOR_STYLES[cat.color][isDark ? 'dark' : 'light'];
+            return (
+              <div key={dua.id} className={`rounded-2xl border overflow-hidden transition ${t.cardBg}`}>
+                <button
+                  onClick={() => setExpanded((v) => (v === dua.id ? null : dua.id))}
+                  className="w-full flex items-center gap-3 p-4 text-left"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${badgeClass}`}>
+                    <Icon size={17} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold truncate">{dua.title}</div>
+                    <div className={`text-xs ${t.textMuted} truncate`}>{dua.occasion}</div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFavorite(dua.id);
+                    }}
+                    className={`p-1.5 rounded-lg shrink-0 ${t.hoverSoft}`}
+                    aria-label="Toggle favorite"
+                  >
+                    <Star size={16} fill={isFav ? '#f59e0b' : 'none'} className={isFav ? 'text-amber-500' : t.textMuted} />
+                  </button>
+                  <ChevronDown size={16} className={`shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''} ${t.textMuted}`} />
+                </button>
+                {isOpen && (
+                  <div className={`px-4 pb-4 pt-1 border-t ${t.divider}`}>
+                    <p className="font-arabic text-right text-2xl leading-relaxed mb-3" dir="rtl">
+                      {dua.arabic}
+                    </p>
+                    <p className={`text-sm italic ${t.textMuted} mb-2 leading-relaxed`}>{dua.translit}</p>
+                    <p className={`text-sm mb-2 leading-relaxed ${t.text}`}>{dua.translation}</p>
+                    {dua.note && <p className={`text-xs ${t.textMuted} mb-3 leading-relaxed`}>{dua.note}</p>}
+                    <button
+                      onClick={() => copyDua(dua)}
+                      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                    >
+                      {copiedId === dua.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                      {copiedId === dua.id ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
