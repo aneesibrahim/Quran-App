@@ -5,6 +5,7 @@ import {
   Loader2, BookOpen, AlertCircle, Clock, Compass, MapPin,
   ChevronDown, Droplets, Info, Volume2, Bell, BellOff,
   Target, Flame, Sparkles, Smartphone, X,
+  Share2, StickyNote, Tag, Download, GraduationCap, Type,
 } from 'lucide-react';
 
 /**
@@ -43,6 +44,52 @@ const LS_REMINDERS = 'quran_reader_prayer_reminders_v1';
 const LS_READ_LOG = 'quran_reader_read_log_v1';
 const LS_KHATMAH = 'quran_reader_khatmah_v1';
 const LS_RECITER = 'quran_reader_reciter_v1';
+const LS_NOTES = 'quran_reader_notes_v1';
+const LS_BEGINNER_MODE = 'quran_reader_beginner_mode_v1';
+
+const QUICK_TAGS = ['Comfort', 'Duas from Quran', 'Guidance', 'Reflection', 'Gratitude', 'Patience'];
+
+const ARABIC_ALPHABET = [
+  { letter: 'ا', name: 'Alif', translit: 'A' },
+  { letter: 'ب', name: 'Ba', translit: 'B' },
+  { letter: 'ت', name: 'Ta', translit: 'T' },
+  { letter: 'ث', name: 'Tha', translit: 'Th' },
+  { letter: 'ج', name: 'Jeem', translit: 'J' },
+  { letter: 'ح', name: 'Hha', translit: 'H·' },
+  { letter: 'خ', name: 'Kha', translit: 'Kh' },
+  { letter: 'د', name: 'Dal', translit: 'D' },
+  { letter: 'ذ', name: 'Dhal', translit: 'Dh' },
+  { letter: 'ر', name: 'Ra', translit: 'R' },
+  { letter: 'ز', name: 'Zay', translit: 'Z' },
+  { letter: 'س', name: 'Seen', translit: 'S' },
+  { letter: 'ش', name: 'Sheen', translit: 'Sh' },
+  { letter: 'ص', name: 'Sad', translit: 'S·' },
+  { letter: 'ض', name: 'Dad', translit: 'D·' },
+  { letter: 'ط', name: 'Ta·', translit: 'T·' },
+  { letter: 'ظ', name: 'Dha·', translit: 'Dh·' },
+  { letter: 'ع', name: 'Ayn', translit: "'" },
+  { letter: 'غ', name: 'Ghayn', translit: 'Gh' },
+  { letter: 'ف', name: 'Fa', translit: 'F' },
+  { letter: 'ق', name: 'Qaf', translit: 'Q' },
+  { letter: 'ك', name: 'Kaf', translit: 'K' },
+  { letter: 'ل', name: 'Lam', translit: 'L' },
+  { letter: 'م', name: 'Meem', translit: 'M' },
+  { letter: 'ن', name: 'Noon', translit: 'N' },
+  { letter: 'ه', name: 'Ha', translit: 'H' },
+  { letter: 'و', name: 'Waw', translit: 'W' },
+  { letter: 'ي', name: 'Ya', translit: 'Y' },
+];
+
+const HARAKAT = [
+  { mark: 'بَ', name: 'Fatha', sound: 'Short "a"', translit: 'Ba' },
+  { mark: 'بِ', name: 'Kasra', sound: 'Short "i"', translit: 'Bi' },
+  { mark: 'بُ', name: 'Damma', sound: 'Short "u"', translit: 'Bu' },
+  { mark: 'بْ', name: 'Sukoon', sound: 'No vowel — a stop', translit: 'B' },
+  { mark: 'بّ', name: 'Shadda', sound: 'Doubled consonant', translit: 'bb' },
+  { mark: 'بً', name: 'Tanween Fath', sound: '"an" sound, often at a sentence end', translit: 'Ban' },
+  { mark: 'بٍ', name: 'Tanween Kasr', sound: '"in" sound', translit: 'Bin' },
+  { mark: 'بٌ', name: 'Tanween Damm', sound: '"un" sound', translit: 'Bun' },
+];
 
 // Total ayahs in the Quran, Uthmani numbering — used to calculate Khatmah
 // (completion) pacing and overall reading progress percentage.
@@ -256,7 +303,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'progress'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'progress' | 'learn'
 
   // ---------------- Surah list ----------------
   const [surahList, setSurahList] = useState([]);
@@ -321,6 +368,15 @@ export default function QuranApp() {
   // effect below) and whenever one is played.
   const [readLog, setReadLog] = useState(() => loadJSON(LS_READ_LOG, { visited: {} }));
   const [khatmah, setKhatmah] = useState(() => loadJSON(LS_KHATMAH, null)); // { targetDate, createdAt, startCount }
+
+  // { "surah:ayah": { text: string, tags: string[] } }
+  const [notes, setNotes] = useState(() => loadJSON(LS_NOTES, {}));
+  const [openNoteFor, setOpenNoteFor] = useState(null); // ayah globalNumber currently being edited, or null
+  const [noteDraft, setNoteDraft] = useState({ text: '', tags: [] });
+
+  const [beginnerMode, setBeginnerMode] = useState(() => loadJSON(LS_BEGINNER_MODE, false));
+
+  const [shareAyah, setShareAyah] = useState(null); // { ayah, surahMeta } while the verse-card modal is open
 
   // ---------------- Audio ----------------
   const [currentAyahIdx, setCurrentAyahIdx] = useState(-1);
@@ -450,6 +506,60 @@ export default function QuranApp() {
     if (khatmah) localStorage.setItem(LS_KHATMAH, JSON.stringify(khatmah));
     else localStorage.removeItem(LS_KHATMAH);
   }, [khatmah]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_NOTES, JSON.stringify(notes));
+  }, [notes]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_BEGINNER_MODE, JSON.stringify(beginnerMode));
+  }, [beginnerMode]);
+
+  const noteKey = (surahNum, numberInSurah) => `${surahNum}:${numberInSurah}`;
+
+  const openNoteEditor = (ayah) => {
+    const key = noteKey(surahMeta.number, ayah.numberInSurah);
+    const existing = notes[key];
+    setNoteDraft({ text: existing?.text || '', tags: existing?.tags || [] });
+    setOpenNoteFor(ayah.globalNumber);
+  };
+
+  const saveNote = (ayah) => {
+    const key = noteKey(surahMeta.number, ayah.numberInSurah);
+    setNotes((prev) => {
+      const next = { ...prev };
+      if (!noteDraft.text.trim() && noteDraft.tags.length === 0) {
+        delete next[key];
+      } else {
+        next[key] = {
+          text: noteDraft.text.trim(),
+          tags: noteDraft.tags,
+          surahNumber: surahMeta.number,
+          surahName: surahMeta.englishName,
+          numberInSurah: ayah.numberInSurah,
+        };
+      }
+      return next;
+    });
+    setOpenNoteFor(null);
+  };
+
+  const deleteNote = (ayah) => {
+    const key = noteKey(surahMeta.number, ayah.numberInSurah);
+    setNotes((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setOpenNoteFor(null);
+  };
+
+  const toggleDraftTag = (tag) => {
+    setNoteDraft((prev) => ({
+      ...prev,
+      tags: prev.tags.includes(tag) ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag],
+    }));
+  };
 
   // Passively record which ayahs have actually been read: whenever an ayah
   // card is more than half visible on screen for a moment, it's logged. This
@@ -694,6 +804,13 @@ export default function QuranApp() {
     [bookmarks]
   );
 
+  const notesList = useMemo(
+    () => Object.entries(notes).map(([key, v]) => ({ key, ...v })),
+    [notes]
+  );
+
+  const [panelTab, setPanelTab] = useState('bookmarks'); // 'bookmarks' | 'notes'
+
   // ---------------- Theme tokens ----------------
   const t = isDark
     ? {
@@ -780,27 +897,43 @@ export default function QuranApp() {
           <div className={`flex items-center gap-1 rounded-lg border ${t.divider} p-1 shrink-0`}>
             <button
               onClick={() => setSection('quran')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
                 section === 'quran' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
+              title="Qur'an"
             >
-              Qur'an
+              <BookOpen size={14} />
+              <span className="hidden sm:inline">Qur'an</span>
             </button>
             <button
               onClick={() => setSection('prayer')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
                 section === 'prayer' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
+              title="Prayer"
             >
-              Prayer
+              <Clock size={14} />
+              <span className="hidden sm:inline">Prayer</span>
             </button>
             <button
               onClick={() => setSection('progress')}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
                 section === 'progress' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
+              title="Progress"
             >
-              Progress
+              <Target size={14} />
+              <span className="hidden sm:inline">Progress</span>
+            </button>
+            <button
+              onClick={() => setSection('learn')}
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                section === 'learn' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+              }`}
+              title="Learn"
+            >
+              <GraduationCap size={14} />
+              <span className="hidden sm:inline">Learn</span>
             </button>
           </div>
 
@@ -825,17 +958,38 @@ export default function QuranApp() {
           {section === 'quran' && (
             <button
               onClick={() => {
-                setShowBookmarksPanel((v) => !v);
+                setShowBookmarksPanel((v) => !(v && panelTab === 'bookmarks'));
+                setPanelTab('bookmarks');
                 setMobileView('list');
               }}
               className={`relative p-2 rounded-lg border ${t.divider} ${t.hoverSoft}`}
               title="Bookmarks"
               aria-label="Bookmarks"
             >
-              <Bookmark size={18} className={showBookmarksPanel ? t.accent : ''} />
+              <Bookmark size={18} className={showBookmarksPanel && panelTab === 'bookmarks' ? t.accent : ''} />
               {bookmarkList.length > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 text-[10px] leading-none bg-emerald-600 text-white rounded-full w-4 h-4 flex items-center justify-center">
                   {bookmarkList.length}
+                </span>
+              )}
+            </button>
+          )}
+
+          {section === 'quran' && (
+            <button
+              onClick={() => {
+                setShowBookmarksPanel((v) => !(v && panelTab === 'notes'));
+                setPanelTab('notes');
+                setMobileView('list');
+              }}
+              className={`relative p-2 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+              title="Notes"
+              aria-label="Notes"
+            >
+              <StickyNote size={18} className={showBookmarksPanel && panelTab === 'notes' ? t.accent : ''} />
+              {notesList.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 text-[10px] leading-none bg-emerald-600 text-white rounded-full w-4 h-4 flex items-center justify-center">
+                  {notesList.length}
                 </span>
               )}
             </button>
@@ -872,7 +1026,24 @@ export default function QuranApp() {
                 {showBookmarksPanel ? (
                   <>
                     <div className="flex items-center justify-between px-1 pb-3">
-                      <h3 className="text-sm font-semibold">Bookmarked Ayahs</h3>
+                      <div className={`flex items-center gap-1 rounded-lg border ${t.divider} p-1`}>
+                        <button
+                          onClick={() => setPanelTab('bookmarks')}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                            panelTab === 'bookmarks' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                          }`}
+                        >
+                          Bookmarks
+                        </button>
+                        <button
+                          onClick={() => setPanelTab('notes')}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                            panelTab === 'notes' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                          }`}
+                        >
+                          Notes
+                        </button>
+                      </div>
                       <button
                         onClick={() => setShowBookmarksPanel(false)}
                         className={`text-xs ${t.textMuted} hover:underline`}
@@ -880,24 +1051,57 @@ export default function QuranApp() {
                         Close
                       </button>
                     </div>
-                    {bookmarkList.length === 0 ? (
+                    {panelTab === 'bookmarks' ? (
+                      bookmarkList.length === 0 ? (
+                        <p className={`text-sm ${t.textMuted} px-1`}>
+                          No bookmarks yet. Tap the bookmark icon on any ayah to save it here.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {bookmarkList.map((b) => (
+                            <button
+                              key={b.key}
+                              onClick={() => selectSurah(b.surahNumber, b.numberInSurah)}
+                              className={`w-full text-left p-3 rounded-xl border transition ${t.cardBg}`}
+                            >
+                              <div className={`text-xs ${t.accent} font-medium mb-1.5`}>
+                                {b.surahName} · Ayah {b.numberInSurah}
+                              </div>
+                              <div className="font-arabic text-right text-lg leading-relaxed truncate" dir="rtl">
+                                {b.arabic}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    ) : notesList.length === 0 ? (
                       <p className={`text-sm ${t.textMuted} px-1`}>
-                        No bookmarks yet. Tap the bookmark icon on any ayah to save it here.
+                        No notes yet. Tap the note icon on any ayah to add a personal reflection or tag.
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        {bookmarkList.map((b) => (
+                        {notesList.map((n) => (
                           <button
-                            key={b.key}
-                            onClick={() => selectSurah(b.surahNumber, b.numberInSurah)}
+                            key={n.key}
+                            onClick={() => selectSurah(n.surahNumber, n.numberInSurah)}
                             className={`w-full text-left p-3 rounded-xl border transition ${t.cardBg}`}
                           >
                             <div className={`text-xs ${t.accent} font-medium mb-1.5`}>
-                              {b.surahName} · Ayah {b.numberInSurah}
+                              {n.surahName} · Ayah {n.numberInSurah}
                             </div>
-                            <div className="font-arabic text-right text-lg leading-relaxed truncate" dir="rtl">
-                              {b.arabic}
-                            </div>
+                            {n.text && <p className="text-sm mb-1.5 line-clamp-2">{n.text}</p>}
+                            {n.tags?.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {n.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-full ${t.chipMedinan}`}
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -1051,6 +1255,8 @@ export default function QuranApp() {
                     const key = surahMeta ? `${surahMeta.number}:${ayah.numberInSurah}` : '';
                     const isBookmarked = !!bookmarks[key];
                     const isActive = idx === currentAyahIdx;
+                    const note = notes[key];
+                    const isEditingNote = openNoteFor === ayah.globalNumber;
                     return (
                       <div
                         key={ayah.globalNumber}
@@ -1076,6 +1282,22 @@ export default function QuranApp() {
 
                           <div className="flex items-center gap-1">
                             <button
+                              onClick={() => setShareAyah({ ayah, surahMeta })}
+                              className={`p-2 rounded-lg ${t.hoverSoft} ${t.textMuted}`}
+                              title="Share as image"
+                              aria-label="Share ayah as image"
+                            >
+                              <Share2 size={16} />
+                            </button>
+                            <button
+                              onClick={() => (isEditingNote ? setOpenNoteFor(null) : openNoteEditor(ayah))}
+                              className={`p-2 rounded-lg ${t.hoverSoft} ${note ? t.accent : t.textMuted}`}
+                              title="Note & tags"
+                              aria-label="Add note or tags"
+                            >
+                              <StickyNote size={16} />
+                            </button>
+                            <button
                               onClick={() => copyAyah(ayah)}
                               className={`p-2 rounded-lg ${t.hoverSoft} ${t.textMuted}`}
                               title="Copy ayah"
@@ -1100,16 +1322,94 @@ export default function QuranApp() {
                           </div>
                         </div>
 
-                        <p className="font-arabic text-right text-3xl leading-[2.3] mb-5" dir="rtl">
+                        <p
+                          className={`font-arabic text-right leading-[2.3] mb-5 ${
+                            beginnerMode ? 'text-5xl leading-[2.6]' : 'text-3xl'
+                          }`}
+                          dir="rtl"
+                        >
                           {ayah.arabic}
                         </p>
 
-                        <p className={`text-sm italic ${t.textMuted} mb-2 leading-relaxed`}>
+                        <p
+                          className={`italic ${t.textMuted} mb-2 leading-relaxed ${
+                            beginnerMode ? 'text-base' : 'text-sm'
+                          }`}
+                        >
                           {ayah.transliteration}
                         </p>
-                        <p className={`font-malayalam text-base leading-relaxed ${t.text}`}>
+                        <p
+                          className={`font-malayalam leading-relaxed ${t.text} ${
+                            beginnerMode ? 'text-lg' : 'text-base'
+                          }`}
+                        >
                           {ayah.translation}
                         </p>
+
+                        {note && !isEditingNote && (
+                          <div className={`mt-4 pt-4 border-t ${t.divider}`}>
+                            {note.text && <p className={`text-sm ${t.text} mb-2 whitespace-pre-wrap`}>{note.text}</p>}
+                            {note.tags?.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {note.tags.map((tag) => (
+                                  <span key={tag} className={`text-[10px] px-1.5 py-0.5 rounded-full ${t.chipMedinan}`}>
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {isEditingNote && (
+                          <div className={`mt-4 pt-4 border-t ${t.divider}`}>
+                            <textarea
+                              value={noteDraft.text}
+                              onChange={(e) => setNoteDraft((p) => ({ ...p, text: e.target.value }))}
+                              placeholder="Your reflection (Tadabbur)…"
+                              rows={3}
+                              className={`w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 resize-none ${t.inputBg}`}
+                            />
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {QUICK_TAGS.map((tag) => (
+                                <button
+                                  key={tag}
+                                  onClick={() => toggleDraftTag(tag)}
+                                  className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border ${
+                                    noteDraft.tags.includes(tag)
+                                      ? `${t.accentBg} text-white border-transparent`
+                                      : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                                  }`}
+                                >
+                                  <Tag size={10} />
+                                  {tag}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-2 mt-3">
+                              <button
+                                onClick={() => saveNote(ayah)}
+                                className={`text-xs px-3 py-1.5 rounded-lg ${t.accentBg} text-white`}
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setOpenNoteFor(null)}
+                                className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                              >
+                                Cancel
+                              </button>
+                              {note && (
+                                <button
+                                  onClick={() => deleteNote(ayah)}
+                                  className="text-xs px-3 py-1.5 rounded-lg text-red-500 hover:bg-red-500/10 ml-auto"
+                                >
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1219,7 +1519,7 @@ export default function QuranApp() {
         </>
       ) : section === 'prayer' ? (
         <PrayerSection t={t} isDark={isDark} />
-      ) : (
+      ) : section === 'progress' ? (
         <ProgressSection
           t={t}
           readingStats={readingStats}
@@ -1227,6 +1527,17 @@ export default function QuranApp() {
           setKhatmah={setKhatmah}
           khatmahStats={khatmahStats}
           onOpenAyah={(surahNum, ayahNum) => selectSurah(surahNum, ayahNum)}
+        />
+      ) : (
+        <LearnSection t={t} beginnerMode={beginnerMode} setBeginnerMode={setBeginnerMode} />
+      )}
+
+      {shareAyah && (
+        <VerseCardModal
+          ayah={shareAyah.ayah}
+          surahMeta={shareAyah.surahMeta}
+          isDark={isDark}
+          onClose={() => setShareAyah(null)}
         />
       )}
     </div>
@@ -2112,6 +2423,449 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, o
             phone's browser menu, choose "Add to Home Screen" to get an app icon that opens straight to this
             dashboard — the Ayah of the Day and next-prayer countdown are both one tap away from there.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ==================== Verse Card export (canvas-based image generator) ==================== */
+
+const CARD_THEMES = [
+  { name: 'Emerald Night', bg: ['#022c22', '#064e3b'], text: '#f8fafc', muted: '#a7f3d0', accent: '#34d399' },
+  { name: 'Parchment Gold', bg: ['#fdf6e3', '#f3e2b8'], text: '#3b2f1e', muted: '#7a6a4a', accent: '#92400e' },
+  { name: 'Midnight Blue', bg: ['#0c1a3d', '#1e3a8a'], text: '#f8fafc', muted: '#c7d7fb', accent: '#93c5fd' },
+];
+
+function wrapTextGeneric(ctx, text, maxWidth) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  words.forEach((word) => {
+    const test = current ? `${current} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  });
+  if (current) lines.push(current);
+  return lines;
+}
+
+function fitText(ctx, text, fontFamily, weight, maxWidth, maxHeight, startSize, minSize, lineHeightRatio = 1.4) {
+  let size = startSize;
+  let lines = [text];
+  let lineHeight = size * lineHeightRatio;
+  while (size >= minSize) {
+    ctx.font = `${weight} ${size}px ${fontFamily}`;
+    lines = wrapTextGeneric(ctx, text, maxWidth);
+    lineHeight = size * lineHeightRatio;
+    if (lines.length * lineHeight <= maxHeight) break;
+    size -= 2;
+  }
+  return { size, lines, lineHeight };
+}
+
+function VerseCardModal({ ayah, surahMeta, onClose }) {
+  const [template, setTemplate] = useState('square'); // 'square' | 'story'
+  const [themeIdx, setThemeIdx] = useState(0);
+  const canvasRef = useRef(null);
+  const shareSupported = typeof navigator !== 'undefined' && !!navigator.share;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const w = 1080;
+    const h = template === 'square' ? 1080 : 1920;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const theme = CARD_THEMES[themeIdx];
+
+    const draw = () => {
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, theme.bg[0]);
+      grad.addColorStop(1, theme.bg[1]);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = theme.accent;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9);
+      ctx.globalAlpha = 1;
+
+      const pad = w * 0.12;
+      const maxWidth = w - pad * 2;
+      let y = h * 0.16;
+
+      ctx.font = `600 ${w * 0.026}px Inter, sans-serif`;
+      ctx.fillStyle = theme.muted;
+      ctx.textAlign = 'center';
+      ctx.direction = 'ltr';
+      ctx.fillText(`${surahMeta.englishName} · ${surahMeta.number}:${ayah.numberInSurah}`, w / 2, y);
+      y += h * 0.06;
+
+      const arabicFit = fitText(ctx, ayah.arabic, 'Amiri, serif', '700', maxWidth, h * 0.36, w * 0.075, w * 0.032, 1.55);
+      ctx.font = `700 ${arabicFit.size}px Amiri, serif`;
+      ctx.fillStyle = theme.text;
+      ctx.direction = 'rtl';
+      ctx.textAlign = 'center';
+      arabicFit.lines.forEach((line) => {
+        y += arabicFit.lineHeight;
+        ctx.fillText(line, w / 2, y);
+      });
+      y += h * 0.05;
+
+      const translitFit = fitText(
+        ctx,
+        ayah.transliteration,
+        'Inter, sans-serif',
+        '400 italic',
+        maxWidth,
+        h * 0.09,
+        w * 0.028,
+        w * 0.018,
+        1.4
+      );
+      ctx.font = `italic 400 ${translitFit.size}px Inter, sans-serif`;
+      ctx.fillStyle = theme.muted;
+      ctx.direction = 'ltr';
+      translitFit.lines.forEach((line) => {
+        y += translitFit.lineHeight;
+        ctx.fillText(line, w / 2, y);
+      });
+      y += h * 0.04;
+
+      const translationFit = fitText(
+        ctx,
+        ayah.translation,
+        '"Noto Sans Malayalam", sans-serif',
+        '500',
+        maxWidth,
+        h * 0.16,
+        w * 0.032,
+        w * 0.02,
+        1.5
+      );
+      ctx.font = `500 ${translationFit.size}px "Noto Sans Malayalam", sans-serif`;
+      ctx.fillStyle = theme.text;
+      translationFit.lines.forEach((line) => {
+        y += translationFit.lineHeight;
+        ctx.fillText(line, w / 2, y);
+      });
+
+      ctx.font = `600 ${w * 0.024}px Inter, sans-serif`;
+      ctx.fillStyle = theme.accent;
+      ctx.fillText("☾ Al-Qur'an", w / 2, h * 0.94);
+    };
+
+    if (document.fonts) {
+      Promise.all([
+        document.fonts.load('700 64px Amiri'),
+        document.fonts.load('500 32px "Noto Sans Malayalam"'),
+        document.fonts.load('600 24px Inter'),
+      ])
+        .catch(() => {})
+        .then(() => document.fonts.ready)
+        .then(draw)
+        .catch(draw);
+    } else {
+      draw();
+    }
+  }, [template, themeIdx, ayah, surahMeta]);
+
+  const handleDownload = () => {
+    const canvas = canvasRef.current;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${surahMeta.englishName}-${ayah.numberInSurah}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+
+  const handleShare = () => {
+    const canvas = canvasRef.current;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `${surahMeta.englishName}-${ayah.numberInSurah}.png`, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: `${surahMeta.englishName} ${ayah.numberInSurah}` });
+        } catch {
+          // user cancelled the share sheet
+        }
+      }
+    }, 'image/png');
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="flex flex-col md:flex-row gap-4 max-w-3xl w-full max-h-full" onClick={(e) => e.stopPropagation()}>
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <canvas
+            ref={canvasRef}
+            className="rounded-xl shadow-2xl max-h-[70vh] md:max-h-[80vh] w-auto"
+            style={{ aspectRatio: template === 'square' ? '1 / 1' : '9 / 16' }}
+          />
+        </div>
+        <div className="w-full md:w-64 bg-slate-900 rounded-xl p-4 text-white space-y-4 shrink-0">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-sm">Share as Image</h3>
+            <button onClick={onClose} className="p-1 rounded hover:bg-slate-800" aria-label="Close">
+              <X size={18} />
+            </button>
+          </div>
+          <div>
+            <div className="text-xs text-slate-400 mb-1.5">Format</div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setTemplate('square')}
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border ${
+                  template === 'square' ? 'bg-emerald-700 border-transparent' : 'border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                Square
+              </button>
+              <button
+                onClick={() => setTemplate('story')}
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border ${
+                  template === 'story' ? 'bg-emerald-700 border-transparent' : 'border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                Story
+              </button>
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-400 mb-1.5">Theme</div>
+            <div className="flex gap-2">
+              {CARD_THEMES.map((th, i) => (
+                <button
+                  key={th.name}
+                  onClick={() => setThemeIdx(i)}
+                  title={th.name}
+                  style={{ background: `linear-gradient(135deg, ${th.bg[0]}, ${th.bg[1]})` }}
+                  className={`w-9 h-9 rounded-full border-2 ${themeIdx === i ? 'border-white' : 'border-transparent'}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 pt-1">
+            <button
+              onClick={handleDownload}
+              className="flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600"
+            >
+              <Download size={16} /> Download PNG
+            </button>
+            {shareSupported && (
+              <button
+                onClick={handleShare}
+                className="flex items-center justify-center gap-2 text-sm px-3 py-2 rounded-lg border border-slate-700 hover:bg-slate-800"
+              >
+                <Share2 size={16} /> Share
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ==================== Learn: alphabet, harakat, and a practice quiz ==================== */
+
+function buildQuizQuestion(pool, prevPrompt) {
+  let item;
+  do {
+    item = pool[Math.floor(Math.random() * pool.length)];
+  } while (pool.length > 1 && item.prompt === prevPrompt);
+  const distractors = pool
+    .filter((p) => p.answer !== item.answer)
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 3)
+    .map((p) => p.answer);
+  const options = [...distractors, item.answer].sort(() => Math.random() - 0.5);
+  return { prompt: item.prompt, answer: item.answer, options };
+}
+
+function LearnSection({ t, beginnerMode, setBeginnerMode }) {
+  const [tab, setTab] = useState('alphabet'); // 'alphabet' | 'harakat' | 'quiz'
+  const [quizPool, setQuizPool] = useState('letters'); // 'letters' | 'harakat'
+  const [question, setQuestion] = useState(() =>
+    buildQuizQuestion(ARABIC_ALPHABET.map((l) => ({ prompt: l.letter, answer: l.translit })))
+  );
+  const [selected, setSelected] = useState(null);
+  const [score, setScore] = useState({ correct: 0, total: 0 });
+
+  const pool = useMemo(
+    () =>
+      quizPool === 'letters'
+        ? ARABIC_ALPHABET.map((l) => ({ prompt: l.letter, answer: l.translit }))
+        : HARAKAT.map((h) => ({ prompt: h.mark, answer: h.translit })),
+    [quizPool]
+  );
+
+  const nextQuestion = useCallback(() => {
+    setQuestion((prev) => buildQuizQuestion(pool, prev.prompt));
+    setSelected(null);
+  }, [pool]);
+
+  useEffect(() => {
+    nextQuestion();
+    setScore({ correct: 0, total: 0 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizPool]);
+
+  const answer = (opt) => {
+    if (selected) return;
+    setSelected(opt);
+    setScore((s) => ({ correct: s.correct + (opt === question.answer ? 1 : 0), total: s.total + 1 }));
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16 space-y-5">
+      <div className={`rounded-2xl border p-4 flex items-center justify-between gap-3 ${t.cardBg}`}>
+        <div className="flex items-center gap-2 min-w-0">
+          <Type size={16} className={`${t.accent} shrink-0`} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium">Beginner Mode</div>
+            <div className={`text-xs ${t.textMuted} truncate`}>Larger Arabic text throughout the Qur'an reader</div>
+          </div>
+        </div>
+        <button
+          onClick={() => setBeginnerMode((v) => !v)}
+          className={`relative w-11 h-6 rounded-full transition shrink-0 ${beginnerMode ? t.accentBg : t.divider + ' border'}`}
+          aria-label="Toggle beginner mode"
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+              beginnerMode ? 'translate-x-5' : ''
+            }`}
+          />
+        </button>
+      </div>
+
+      <div className={`flex items-center gap-1 rounded-xl border ${t.divider} p-1 w-fit`}>
+        {[
+          { key: 'alphabet', label: 'Alphabet' },
+          { key: 'harakat', label: 'Vowel Marks' },
+          { key: 'quiz', label: 'Quiz' },
+        ].map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setTab(s.key)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+              tab === s.key ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'alphabet' && (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+          {ARABIC_ALPHABET.map((l) => (
+            <div key={l.letter} className={`rounded-2xl border p-4 text-center ${t.cardBg}`}>
+              <div className="font-arabic text-4xl mb-2" dir="rtl">
+                {l.letter}
+              </div>
+              <div className="text-sm font-medium">{l.name}</div>
+              <div className={`text-xs ${t.textMuted}`}>{l.translit}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'harakat' && (
+        <div className="space-y-2">
+          <p className={`text-xs ${t.textMuted} leading-relaxed mb-2`}>
+            Harakat are the small marks placed above or below a letter that show its short vowel sound — essential
+            for reading the Qur'an correctly. Shown here on the letter ب (Ba) as an example.
+          </p>
+          {HARAKAT.map((h) => (
+            <div key={h.name} className={`rounded-xl border p-3 flex items-center gap-4 ${t.cardBg}`}>
+              <div className="font-arabic text-3xl w-14 text-center shrink-0" dir="rtl">
+                {h.mark}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">
+                  {h.name} <span className={`text-xs ${t.textMuted}`}>({h.translit})</span>
+                </div>
+                <div className={`text-xs ${t.textMuted}`}>{h.sound}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'quiz' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className={`flex items-center gap-1 rounded-lg border ${t.divider} p-1`}>
+              <button
+                onClick={() => setQuizPool('letters')}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                  quizPool === 'letters' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                }`}
+              >
+                Letters
+              </button>
+              <button
+                onClick={() => setQuizPool('harakat')}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                  quizPool === 'harakat' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                }`}
+              >
+                Vowel Marks
+              </button>
+            </div>
+            <div className={`text-xs ${t.textMuted}`}>
+              Score: {score.correct}/{score.total}
+            </div>
+          </div>
+
+          <div className={`rounded-2xl border p-8 text-center ${t.cardBg}`}>
+            <div className={`text-xs ${t.textMuted} mb-3`}>What is the transliteration of:</div>
+            <div className="font-arabic text-6xl mb-2" dir="rtl">
+              {question.prompt}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {question.options.map((opt) => {
+              const isCorrect = opt === question.answer;
+              const isPicked = opt === selected;
+              let style = t.cardBg;
+              if (selected) {
+                if (isCorrect) style = 'border-emerald-500 bg-emerald-500/10';
+                else if (isPicked) style = 'border-red-500 bg-red-500/10';
+              }
+              return (
+                <button
+                  key={opt}
+                  onClick={() => answer(opt)}
+                  disabled={!!selected}
+                  className={`rounded-xl border p-4 text-lg font-medium transition ${style}`}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+
+          {selected && (
+            <button onClick={nextQuestion} className={`w-full text-sm px-4 py-2.5 rounded-xl ${t.accentBg} text-white`}>
+              Next question
+            </button>
+          )}
         </div>
       )}
     </div>
