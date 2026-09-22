@@ -426,6 +426,23 @@ const SALAH_STEPS = [
   },
 ];
 
+// A curated set of well-established reciters known for complete, reliably
+// maintained per-ayah audio on the Islamic Network CDN — rather than the
+// full list from the API (70+ editions), which includes many with gaps or
+// inconsistent coverage that caused the audio issues reported earlier.
+const TRUSTED_RECITERS = [
+  'ar.alafasy',
+  'ar.husary',
+  'ar.minshawi',
+  'ar.abdulbasitmurattal',
+  'ar.abdurrahmaansudais',
+  'ar.shaatree',
+  'ar.hudhaify',
+  'ar.mahermuaiqly',
+  'ar.ahmedajamy',
+  'ar.saoodshuraym',
+];
+
 function loadJSON(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -516,9 +533,12 @@ export default function QuranApp() {
     fetch(`${API_BASE}/edition/format/audio`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('failed'))))
       .then((data) => {
-        const arabic = (data.data || []).filter((e) => e.language === 'ar');
-        arabic.sort((a, b) => a.englishName.localeCompare(b.englishName));
-        setReciterList(arabic);
+        const all = data.data || [];
+        // Only offer the curated, reliably-working reciters — matched
+        // against the live API response so names/identifiers stay accurate,
+        // ordered to match TRUSTED_RECITERS (most familiar first).
+        const trusted = TRUSTED_RECITERS.map((id) => all.find((e) => e.identifier === id)).filter(Boolean);
+        setReciterList(trusted.length ? trusted : all.filter((e) => e.language === 'ar'));
       })
       .catch(() => setReciterList([]))
       .finally(() => setReciterListLoading(false));
@@ -569,11 +589,14 @@ export default function QuranApp() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [audioWarning, setAudioWarning] = useState(null);
 
   const audioRef = useRef(null);
   const ayahRefs = useRef({});
   const requestIdRef = useRef(0);
   const pendingJumpRef = useRef(null);
+  const resumeRef = useRef(null); // { numberInSurah, wasPlaying } captured just before a reciter switch
+  const reciterSwitchRef = useRef(false); // true = the next fetchAyahs call is a reciter-only refresh
 
   // ---------------- Fonts (Amiri for Arabic, Noto Sans Malayalam) ----------------
   useEffect(() => {
@@ -622,14 +645,17 @@ export default function QuranApp() {
 
   // ---------------- Fetch: Ayahs for a Surah ----------------
   const fetchAyahs = useCallback(
-    (num) => {
+    (num, opts = {}) => {
+      const { preserveList = false } = opts;
       const myId = ++requestIdRef.current;
       setAyahsLoading(true);
       setAyahsError(null);
-      setAyahs([]);
-      setSurahMeta(null);
-      setCurrentAyahIdx(-1);
-      setIsPlaying(false);
+      if (!preserveList) {
+        setAyahs([]);
+        setSurahMeta(null);
+        setCurrentAyahIdx(-1);
+        setIsPlaying(false);
+      }
 
       fetch(`${API_BASE}/surah/${num}/editions/${buildEditions(reciter)}`)
         .then((r) => {
@@ -639,14 +665,27 @@ export default function QuranApp() {
         .then((data) => {
           if (myId !== requestIdRef.current) return;
           const [arabicEd, malayalamEd, translitEd, audioEd] = data.data;
-          const merged = arabicEd.ayahs.map((a, i) => ({
-            globalNumber: a.number,
-            numberInSurah: a.numberInSurah,
-            arabic: a.text,
-            translation: malayalamEd.ayahs[i]?.text || '',
-            transliteration: translitEd.ayahs[i]?.text || '',
-            audioUrl: audioEd.ayahs[i]?.audio || '',
-          }));
+          const merged = arabicEd.ayahs.map((a, i) => {
+            const audioEntry = audioEd.ayahs[i];
+            // Some editions leave the primary `audio` field empty for certain
+            // ayahs even though a working URL exists elsewhere — fall back to
+            // audioSecondary, the alternate mirror the API itself provides.
+            // (A previous version of this also guessed a CDN URL with a
+            // hardcoded bitrate, but not every reciter is actually hosted at
+            // that bitrate — for those it 404'd on literally every ayah,
+            // which combined with auto-skip-on-error caused a runaway
+            // cascade through the whole surah. Only trust URLs the API
+            // actually hands back.)
+            const audioUrl = audioEntry?.audio || audioEntry?.audioSecondary?.[0] || '';
+            return {
+              globalNumber: a.number,
+              numberInSurah: a.numberInSurah,
+              arabic: a.text,
+              translation: malayalamEd.ayahs[i]?.text || '',
+              transliteration: translitEd.ayahs[i]?.text || '',
+              audioUrl,
+            };
+          });
           setAyahs(merged);
           setSurahMeta({
             number: arabicEd.number,
@@ -656,6 +695,18 @@ export default function QuranApp() {
             revelationType: arabicEd.revelationType,
             numberOfAyahs: arabicEd.numberOfAyahs,
           });
+
+          // A reciter switch mid-playback: put the same ayah back up in the
+          // new voice instead of losing your place.
+          if (resumeRef.current) {
+            const { numberInSurah, wasPlaying } = resumeRef.current;
+            resumeRef.current = null;
+            const idx = merged.findIndex((a) => a.numberInSurah === numberInSurah);
+            if (idx >= 0) {
+              setCurrentAyahIdx(idx);
+              setIsPlaying(wasPlaying);
+            }
+          }
         })
         .catch((err) => {
           if (myId !== requestIdRef.current) return;
@@ -669,7 +720,10 @@ export default function QuranApp() {
   );
 
   useEffect(() => {
-    if (selectedSurah) fetchAyahs(selectedSurah);
+    if (selectedSurah) {
+      fetchAyahs(selectedSurah, { preserveList: reciterSwitchRef.current });
+      reciterSwitchRef.current = false;
+    }
   }, [selectedSurah, fetchAyahs]);
 
   // ---------------- Persistence ----------------
@@ -847,11 +901,38 @@ export default function QuranApp() {
   }, [lastRead]);
 
   // ---------------- Audio playback ----------------
-  useEffect(() => {
-    if (currentAyahIdx < 0 || !ayahs[currentAyahIdx] || !audioRef.current) return;
-    const ayah = ayahs[currentAyahIdx];
+  const currentAyah = currentAyahIdx >= 0 ? ayahs[currentAyahIdx] : null;
+  const currentAudioUrl = currentAyah?.audioUrl || '';
+  const audioFailStreakRef = useRef(0);
+  const MAX_AUTO_SKIP_STREAK = 2; // stop auto-advancing after this many failures in a row
 
-    audioRef.current.src = ayah.audioUrl;
+  const registerAudioFailure = () => {
+    audioFailStreakRef.current += 1;
+    if (audioFailStreakRef.current > MAX_AUTO_SKIP_STREAK) {
+      // Several ayahs in a row have no working audio for this reciter —
+      // stop instead of racing silently through the rest of the surah.
+      audioFailStreakRef.current = 0;
+      setIsPlaying(false);
+      setAudioWarning(
+        `Several ayahs in a row have no audio available for this reciter. Try a different reciter, or continue reading without audio.`
+      );
+      return;
+    }
+    if (isPlaying) handleNext();
+  };
+
+  useEffect(() => {
+    if (!currentAyah || !audioRef.current) return;
+
+    if (!currentAudioUrl) {
+      // This reciter has no recording for this ayah.
+      registerAudioFailure();
+      return;
+    }
+
+    if (audioRef.current.src !== currentAudioUrl) {
+      audioRef.current.src = currentAudioUrl;
+    }
     if (isPlaying) {
       audioRef.current.play().catch(() => setIsPlaying(false));
     }
@@ -860,16 +941,30 @@ export default function QuranApp() {
       setLastRead({
         surahNumber: surahMeta.number,
         surahName: surahMeta.englishName,
-        numberInSurah: ayah.numberInSurah,
+        numberInSurah: currentAyah.numberInSurah,
       });
     }
 
-    ayahRefs.current[ayah.globalNumber]?.scrollIntoView({
+    ayahRefs.current[currentAyah.globalNumber]?.scrollIntoView({
       behavior: 'smooth',
       block: 'center',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentAyahIdx]);
+  }, [currentAyahIdx, currentAudioUrl]);
+
+  const handleAudioError = () => {
+    // A specific recording failed to load/play (missing file, network blip,
+    // etc.) — try skipping ahead, but the streak counter stops it from
+    // cascading unchecked if the whole reciter is broken.
+    registerAudioFailure();
+  };
+
+  const handleAudioPlaying = () => {
+    // Confirms this ayah's audio actually started — clear the failure streak
+    // and any warning from earlier skips.
+    audioFailStreakRef.current = 0;
+    setAudioWarning(null);
+  };
 
   const handlePlayPause = () => {
     if (currentAyahIdx < 0) {
@@ -889,6 +984,8 @@ export default function QuranApp() {
   };
 
   const playAyah = (idx) => {
+    audioFailStreakRef.current = 0;
+    setAudioWarning(null);
     setCurrentAyahIdx(idx);
     setIsPlaying(true);
   };
@@ -897,6 +994,8 @@ export default function QuranApp() {
     if (currentAyahIdx < ayahs.length - 1) {
       setCurrentAyahIdx((i) => i + 1);
       setIsPlaying(true);
+    } else {
+      setIsPlaying(false);
     }
   };
 
@@ -966,6 +1065,8 @@ export default function QuranApp() {
   };
 
   const selectSurah = (num, jumpToAyah) => {
+    audioFailStreakRef.current = 0;
+    setAudioWarning(null);
     if (jumpToAyah) pendingJumpRef.current = jumpToAyah;
     setSelectedSurah(num);
     setSection('quran');
@@ -1643,6 +1744,17 @@ export default function QuranApp() {
           {/* ---------------- Sticky audio controller ---------------- */}
           {ayahs.length > 0 && (
             <div className={`fixed bottom-0 inset-x-0 z-40 border-t backdrop-blur ${t.playerBg}`}>
+              {audioWarning && (
+                <div className="max-w-3xl mx-auto px-4 pt-2">
+                  <div className="flex items-start gap-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                    <span className="flex-1">{audioWarning}</span>
+                    <button onClick={() => setAudioWarning(null)} className="shrink-0" aria-label="Dismiss">
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="max-w-3xl mx-auto px-4 py-3">
                 <div className="flex items-center gap-2 mb-2">
                   <span className={`text-xs ${t.textMuted} w-9 tabular-nums`}>{formatTime(progress)}</span>
@@ -1687,6 +1799,19 @@ export default function QuranApp() {
                             <button
                               key={r.identifier}
                               onClick={() => {
+                                if (r.identifier === reciter) {
+                                  setShowReciterPicker(false);
+                                  return;
+                                }
+                                audioFailStreakRef.current = 0;
+                                setAudioWarning(null);
+                                if (currentAyahIdx >= 0 && ayahs[currentAyahIdx]) {
+                                  resumeRef.current = {
+                                    numberInSurah: ayahs[currentAyahIdx].numberInSurah,
+                                    wasPlaying: isPlaying,
+                                  };
+                                  reciterSwitchRef.current = true;
+                                }
                                 setReciter(r.identifier);
                                 setShowReciterPicker(false);
                               }}
@@ -1736,6 +1861,8 @@ export default function QuranApp() {
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleTimeUpdate}
             onEnded={handleEnded}
+            onError={handleAudioError}
+            onPlaying={handleAudioPlaying}
             className="hidden"
           />
         </>
