@@ -327,6 +327,7 @@ function addDays(dateKey, days) {
 // chime instead, so reminders never fail silently.
 const ADHAN_AUDIO_URL = '/adhan.mp3';
 const LS_REMINDERS_FIRED = 'quran_reader_prayer_fired_v1';
+const LS_COMPASS_FLIP = 'quran_reader_compass_flip_v1';
 const REMINDER_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const REMINDER_GRACE_MIN = 2; // still fire if the tab was throttled/asleep for up to this long
 
@@ -537,6 +538,29 @@ function playReminderChime() {
   } catch {
     // Web Audio unsupported/blocked — silently skip the chime, the text/notification still show.
   }
+}
+
+// Compass heading (degrees clockwise from north) of the direction the user is facing,
+// from W3C device orientation angles. Uses the full rotation, so it stays correct
+// whether the phone is flat or held upright / tilted.
+function headingFromOrientation(alpha, beta, gamma) {
+  const r = Math.PI / 180;
+  const cA = Math.cos(alpha * r), sA = Math.sin(alpha * r);
+  const cB = Math.cos(beta * r), sB = Math.sin(beta * r);
+  const cG = Math.cos(gamma * r), sG = Math.sin(gamma * r);
+  // Direction the back of the device points (earth frame: east, north, up)
+  const backE = -(cA * sG + sA * sB * cG);
+  const backN = cA * sB * cG - sA * sG;
+  // Direction the top edge points
+  const topE = -sA * cB;
+  const topN = cA * cB;
+  // Phone roughly flat: the back points at the ground, so use the top edge.
+  // Otherwise (held upright / tilted) use the direction the back faces.
+  const flat = Math.abs(cB * cG) > 0.75;
+  const e = flat ? topE : backE;
+  const n = flat ? topN : backN;
+  if (Math.abs(e) < 1e-6 && Math.abs(n) < 1e-6) return null;
+  return ((Math.atan2(e, n) * 180) / Math.PI + 360) % 360;
 }
 
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -2646,6 +2670,10 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
   const [compassOn, setCompassOn] = useState(false);
   const [heading, setHeading] = useState(null);
   const [compassSupported, setCompassSupported] = useState(true);
+  const [compassFlip, setCompassFlip] = useState(() => loadJSON(LS_COMPASS_FLIP, false)); // manual 180° correction
+  const isMobileDevice =
+    typeof navigator !== 'undefined' &&
+    (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1); // iPadOS reports as a Mac
 
   const [expandedGuide, setExpandedGuide] = useState('wudu'); // 'wudu' | 'salah' | null
 
@@ -2763,15 +2791,14 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
   }, [location]);
 
   // Live device compass.
-  // Only trust *true* absolute headings — iOS's webkitCompassHeading, or a
-  // deviceorientation(absolute) event with e.absolute === true. A plain
-  // deviceorientation event with absolute:false is relative to wherever the
-  // phone happened to be pointed when the page loaded, not real north — using
-  // it was the main cause of the compass feeling wrong. Readings are also
-  // smoothed (shortest-path) to stop the needle jittering.
+  // iOS gives a ready-made heading (webkitCompassHeading). On Android/others we
+  // use the absolute orientation event and work out the heading from all three
+  // angles, so it stays right when the phone is tilted or held upright (the old
+  // `360 - alpha` shortcut is only valid flat and could come out 180° off).
+  // Relative (non-absolute) events are ignored — they aren't real compass readings.
   useEffect(() => {
     if (!compassOn) return;
-    let gotAbsoluteReading = false;
+    let gotReading = false;
     let smoothed = null;
 
     const applyHeading = (raw) => {
@@ -2789,20 +2816,22 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
 
     const handler = (e) => {
       if (typeof e.webkitCompassHeading === 'number') {
-        gotAbsoluteReading = true;
+        gotReading = true;
         applyHeading(e.webkitCompassHeading);
-      } else if (e.absolute === true && typeof e.alpha === 'number') {
-        gotAbsoluteReading = true;
-        applyHeading(360 - e.alpha);
+      } else if (e.absolute === true && typeof e.alpha === 'number' && typeof e.beta === 'number' && typeof e.gamma === 'number') {
+        const h = headingFromOrientation(e.alpha, e.beta, e.gamma);
+        if (h !== null) {
+          gotReading = true;
+          applyHeading(h);
+        }
       }
-      // Non-absolute events are ignored entirely — they aren't true compass headings.
     };
 
     window.addEventListener('deviceorientationabsolute', handler, true);
     window.addEventListener('deviceorientation', handler, true);
 
     const supportTimer = setTimeout(() => {
-      if (!gotAbsoluteReading) setCompassSupported(false);
+      if (!gotReading) setCompassSupported(false);
     }, 2500);
 
     return () => {
@@ -2811,6 +2840,18 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
       clearTimeout(supportTimer);
     };
   }, [compassOn]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_COMPASS_FLIP, JSON.stringify(compassFlip));
+  }, [compassFlip]);
+
+  // Heading after the optional manual flip, and how far the Qibla is from it.
+  const effHeading = heading == null ? null : (heading + (compassFlip ? 180 : 0)) % 360;
+  const qiblaDiff = qibla != null && effHeading != null ? ((qibla - effHeading + 540) % 360) - 180 : null; // + = turn right
+  const facingQibla = qiblaDiff != null && Math.abs(qiblaDiff) <= 5;
+  useEffect(() => {
+    if (facingQibla && typeof navigator.vibrate === 'function') navigator.vibrate(40);
+  }, [facingQibla]);
 
   const enableCompass = async () => {
     setCompassSupported(true);
@@ -3034,7 +3075,7 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                   viewBox="0 0 200 200"
                   className="w-full h-full"
                   style={{
-                    transform: `rotate(${compassOn && heading != null ? -heading : 0}deg)`,
+                    transform: `rotate(${compassOn && effHeading != null ? -effHeading : 0}deg)`,
                     transition: 'transform 0.2s linear',
                   }}
                 >
@@ -3051,7 +3092,7 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                   <text x="185" y="105" textAnchor="middle" fontSize="14" fill={isDark ? '#A8A69C' : '#6B6A63'}>
                     E
                   </text>
-                  <g style={{ transform: `rotate(${qibla}deg)`, transformOrigin: '100px 100px' }}>
+                  <g transform={`rotate(${qibla} 100 100)`}>
                     <line x1="100" y1="100" x2="100" y2="25" stroke="#66806B" strokeWidth="4" strokeLinecap="round" />
                     <polygon points="100,15 92,32 108,32" fill="#66806B" />
                   </g>
@@ -3059,7 +3100,15 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                 </svg>
               </div>
               <div className="text-center mb-4">
-                <div className="text-2xl font-semibold mb-1">{Math.round(qibla)}° from North</div>
+                <div className="text-2xl font-semibold mb-1">Qibla: {Math.round(qibla)}° from North</div>
+                {compassOn && effHeading != null && (
+                  <div className={`text-sm mb-1 ${facingQibla ? 'text-emerald-500 font-medium' : t.textMuted}`}>
+                    {facingQibla
+                      ? '✓ You are facing the Qibla'
+                      : `Turn ${Math.round(Math.abs(qiblaDiff))}° ${qiblaDiff > 0 ? 'right' : 'left'}`}
+                    <span className={`block text-xs ${t.textFaint}`}>You are facing {Math.round(effHeading)}°</span>
+                  </div>
+                )}
                 {distanceToKaaba && (
                   <div className={`text-sm ${t.textMuted}`}>
                     ~{Math.round(distanceToKaaba).toLocaleString()} km to the Kaaba
@@ -3071,16 +3120,30 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                   Enable Live Compass
                 </button>
               ) : (
-                <p className={`text-xs ${t.textMuted} text-center max-w-xs`}>
-                  Hold your phone flat, away from metal or magnets. The green arrow points toward the Qibla as
-                  you turn. If it feels off, wave your phone in a figure-8 a few times to recalibrate the
-                  magnetometer.
-                </p>
+                <div className="flex flex-col items-center gap-2 max-w-xs">
+                  <p className={`text-xs ${t.textMuted} text-center`}>
+                    Hold your phone in portrait, away from metal, magnets and cases with magnetic clasps. The green
+                    arrow points to the Qibla as you turn. If it drifts, wave your phone in a figure-8 to recalibrate.
+                  </p>
+                  <p className={`text-xs ${t.textFaint} text-center`}>
+                    Check: the "You are facing" number should match your phone's own compass app (small differences
+                    are normal). If it is 180° off, use the button below.
+                  </p>
+                  <button
+                    onClick={() => setCompassFlip((v) => !v)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${
+                      compassFlip ? t.accent : ''
+                    }`}
+                  >
+                    {compassFlip ? 'Reversed: ON (tap to undo)' : 'Compass reversed? Flip 180°'}
+                  </button>
+                </div>
               )}
               {!compassSupported && (
                 <p className="text-xs text-red-500 mt-2 text-center max-w-xs">
-                  Live compass isn't available on this device or browser (it needs a magnetometer, HTTPS, and
-                  permission). Point the top of your screen North and use the number above instead.
+                  {isMobileDevice
+                    ? "Live compass isn't available: it needs a magnetometer, a secure (HTTPS) page and permission. Allow motion/orientation access, or use the bearing above with your phone's compass app."
+                    : "Laptops and desktops normally have no compass sensor, so a live compass can't work there. Open this page on your phone, or use the bearing above (Qibla direction in degrees from North) with any compass."}
                 </p>
               )}
             </div>
