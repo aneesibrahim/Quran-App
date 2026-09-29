@@ -7,7 +7,7 @@ import {
   Target, Flame, Sparkles, Smartphone, X,
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
   Home, Shield, Users, Utensils, Star, MoreHorizontal,
-  VolumeX, RotateCcw, ChevronUp,
+  VolumeX, RotateCcw, ChevronUp, Repeat, Infinity as InfinityIcon,
 } from 'lucide-react';
 
 /**
@@ -628,6 +628,13 @@ export default function QuranApp() {
   const [isMuted, setIsMuted] = useState(false);
   const [playerHidden, setPlayerHidden] = useState(false);
 
+  // ---------------- Multi-ayah selection & loop/repeat (memorization aid) ----------------
+  const [selectMode, setSelectMode] = useState(false); // tapping an ayah sets range start/end instead of playing it
+  const [rangeStart, setRangeStart] = useState(null); // numberInSurah
+  const [rangeEnd, setRangeEnd] = useState(null); // numberInSurah, null while only the start is picked
+  const [loopTarget, setLoopTarget] = useState(3); // desired repeat count; Infinity for "loop forever"
+  const [loopRemaining, setLoopRemaining] = useState(0); // >0 while a loop is actively playing; 0 = not looping
+
   const audioRef = useRef(null);
   const ayahRefs = useRef({});
   const requestIdRef = useRef(0);
@@ -1023,11 +1030,13 @@ export default function QuranApp() {
   const playAyah = (idx) => {
     audioFailStreakRef.current = 0;
     setAudioWarning(null);
+    setLoopRemaining(0); // manual selection overrides an active loop
     setCurrentAyahIdx(idx);
     setIsPlaying(true);
   };
 
   const handleNext = () => {
+    setLoopRemaining(0);
     if (currentAyahIdx < ayahs.length - 1) {
       setCurrentAyahIdx((i) => i + 1);
       setIsPlaying(true);
@@ -1037,13 +1046,75 @@ export default function QuranApp() {
   };
 
   const handlePrev = () => {
+    setLoopRemaining(0);
     if (currentAyahIdx > 0) {
       setCurrentAyahIdx((i) => i - 1);
       setIsPlaying(true);
     }
   };
 
+  // Ayah tap handler while in selection mode: first tap sets the range
+  // start, second tap sets the end (order-independent — tapping an earlier
+  // ayah second just becomes the new start). Tapping while a full range is
+  // already set starts a fresh selection.
+  const handleAyahSelectTap = (ayah) => {
+    if (rangeStart === null || rangeEnd !== null) {
+      setRangeStart(ayah.numberInSurah);
+      setRangeEnd(null);
+    } else {
+      setRangeStart(Math.min(rangeStart, ayah.numberInSurah));
+      setRangeEnd(Math.max(rangeStart, ayah.numberInSurah));
+    }
+  };
+
+  const clearSelection = () => {
+    setRangeStart(null);
+    setRangeEnd(null);
+    setSelectMode(false);
+  };
+
+  const startLoop = () => {
+    if (rangeStart === null) return;
+    const startIdx = ayahs.findIndex((a) => a.numberInSurah === rangeStart);
+    if (startIdx < 0) return;
+    audioFailStreakRef.current = 0;
+    setAudioWarning(null);
+    setSelectMode(false);
+    setLoopRemaining(loopTarget === Infinity ? Infinity : loopTarget);
+    setCurrentAyahIdx(startIdx);
+    setIsPlaying(true);
+  };
+
+  const stopLoop = () => {
+    setLoopRemaining(0);
+  };
+
   const handleEnded = () => {
+    if (loopRemaining > 0 && rangeStart !== null) {
+      const rangeEndValue = rangeEnd ?? rangeStart;
+      const finishedAyah = ayahs[currentAyahIdx];
+      if (finishedAyah && finishedAyah.numberInSurah === rangeEndValue) {
+        // Reached the end of the selected range — loop back to the start,
+        // or stop if this was the last repetition.
+        const nextRemaining = loopRemaining === Infinity ? Infinity : loopRemaining - 1;
+        if (nextRemaining <= 0) {
+          setLoopRemaining(0);
+          setIsPlaying(false);
+          return;
+        }
+        const startIdx = ayahs.findIndex((a) => a.numberInSurah === rangeStart);
+        setLoopRemaining(nextRemaining);
+        setCurrentAyahIdx(startIdx >= 0 ? startIdx : currentAyahIdx);
+        setIsPlaying(true);
+        return;
+      }
+      // Still inside the range — continue to the next ayah normally.
+      if (currentAyahIdx < ayahs.length - 1) {
+        setCurrentAyahIdx((i) => i + 1);
+        setIsPlaying(true);
+      }
+      return;
+    }
     if (currentAyahIdx < ayahs.length - 1) {
       setCurrentAyahIdx((i) => i + 1);
       setIsPlaying(true);
@@ -1120,6 +1191,10 @@ export default function QuranApp() {
   const selectSurah = (num, jumpToAyah) => {
     audioFailStreakRef.current = 0;
     setAudioWarning(null);
+    setSelectMode(false);
+    setRangeStart(null);
+    setRangeEnd(null);
+    setLoopRemaining(0);
     if (jumpToAyah) pendingJumpRef.current = jumpToAyah;
     setSelectedSurah(num);
     setSection('quran');
@@ -1657,6 +1732,97 @@ export default function QuranApp() {
                   </div>
                 )}
 
+                {selectedSurah && surahMeta && !ayahsLoading && ayahs.length > 0 && (
+                  <div className="mb-6">
+                    {loopRemaining > 0 ? (
+                      <div className={`flex items-center justify-between gap-3 rounded-3xl border px-4 py-3 ${t.cardActive}`}>
+                        <div className="flex items-center gap-2 text-sm min-w-0">
+                          <Repeat size={16} className={`${t.accent} shrink-0`} />
+                          <span className="truncate">
+                            Looping Ayah {rangeStart}–{rangeEnd ?? rangeStart} ·{' '}
+                            {loopRemaining === Infinity
+                              ? 'repeating forever'
+                              : `${loopRemaining} repeat${loopRemaining === 1 ? '' : 's'} left`}
+                          </span>
+                        </div>
+                        <button
+                          onClick={stopLoop}
+                          className={`text-xs px-3 py-1.5 rounded-full border shrink-0 ${t.divider} ${t.hoverSoft}`}
+                        >
+                          Stop
+                        </button>
+                      </div>
+                    ) : selectMode ? (
+                      <div className={`rounded-3xl border px-4 py-3 ${t.cardBg}`}>
+                        <div className="flex items-center justify-between gap-3 mb-1">
+                          <span className="text-sm font-medium">
+                            {rangeStart === null
+                              ? 'Tap an ayah to start your selection'
+                              : rangeEnd === null
+                              ? `Start: Ayah ${rangeStart} — tap another ayah to set the end`
+                              : `Ayah ${rangeStart}–${rangeEnd} selected`}
+                          </span>
+                          <button onClick={clearSelection} className={`text-xs ${t.textMuted} hover:underline shrink-0`}>
+                            Cancel
+                          </button>
+                        </div>
+                        {rangeStart !== null && rangeEnd !== null && (
+                          <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-xs ${t.textMuted}`}>Repeat</span>
+                              <div className={`flex items-center gap-1 rounded-full border ${t.divider} p-0.5`}>
+                                <button
+                                  onClick={() => setLoopTarget((v) => (v === Infinity ? 10 : Math.max(1, v - 1)))}
+                                  className={`w-6 h-6 rounded-full ${t.hoverSoft}`}
+                                  aria-label="Fewer repeats"
+                                >
+                                  −
+                                </button>
+                                <span className="w-8 text-center text-sm tabular-nums">
+                                  {loopTarget === Infinity ? '∞' : loopTarget}
+                                </span>
+                                <button
+                                  onClick={() => setLoopTarget((v) => (v === Infinity ? Infinity : v + 1))}
+                                  className={`w-6 h-6 rounded-full ${t.hoverSoft}`}
+                                  aria-label="More repeats"
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <button
+                                onClick={() => setLoopTarget((v) => (v === Infinity ? 3 : Infinity))}
+                                className={`p-1.5 rounded-full ${
+                                  loopTarget === Infinity ? `${t.accentBg} text-white` : `${t.hoverSoft} ${t.textFaint}`
+                                }`}
+                                title="Repeat forever"
+                                aria-label="Repeat forever"
+                              >
+                                <InfinityIcon size={14} />
+                              </button>
+                            </div>
+                            <button
+                              onClick={startLoop}
+                              className={`text-xs px-4 py-1.5 rounded-full ${t.accentBg} text-white`}
+                            >
+                              Start Loop
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => setSelectMode(true)}
+                          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border ${t.divider} ${t.textMuted} ${t.hoverSoft}`}
+                        >
+                          <Repeat size={13} />
+                          Loop a range for memorization
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {ayahsLoading && (
                   <div className="flex items-center justify-center py-24">
                     <Loader2 className="animate-spin" size={28} />
@@ -1681,6 +1847,10 @@ export default function QuranApp() {
                     const key = surahMeta ? `${surahMeta.number}:${ayah.numberInSurah}` : '';
                     const isBookmarked = !!bookmarks[key];
                     const isActive = idx === currentAyahIdx;
+                    const isInRange =
+                      rangeStart !== null &&
+                      ayah.numberInSurah >= rangeStart &&
+                      ayah.numberInSurah <= (rangeEnd ?? rangeStart);
                     const note = notes[key];
                     const isEditingNote = openNoteFor === ayah.globalNumber;
                     return (
@@ -1690,8 +1860,21 @@ export default function QuranApp() {
                           ayahRefs.current[ayah.globalNumber] = el;
                         }}
                         data-global-number={ayah.globalNumber}
-                        className={`rounded-3xl border p-5 transition ${isActive ? t.cardActive : t.cardBg}`}
+                        className={`relative rounded-3xl border p-5 transition ${
+                          isInRange
+                            ? 'border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30'
+                            : isActive
+                            ? t.cardActive
+                            : t.cardBg
+                        }`}
                       >
+                        {selectMode && (
+                          <button
+                            onClick={() => handleAyahSelectTap(ayah)}
+                            className="absolute inset-0 z-10 rounded-3xl"
+                            aria-label={`Select ayah ${ayah.numberInSurah}`}
+                          />
+                        )}
                         <div className="flex items-center justify-between mb-4">
                           <button
                             onClick={() => playAyah(idx)}
