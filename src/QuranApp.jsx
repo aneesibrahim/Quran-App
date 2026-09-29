@@ -8,6 +8,7 @@ import {
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
   Home, Shield, Users, Utensils, Star, MoreHorizontal,
   VolumeX, RotateCcw, ChevronUp, Repeat, Infinity as InfinityIcon,
+  ChevronRight, CalendarDays,
 } from 'lucide-react';
 
 /**
@@ -114,6 +115,12 @@ const HARAKAT = [
 ];
 
 const LS_DUA_FAVORITES = 'quran_reader_dua_favorites_v1';
+const LS_HIJRI_ADJUST = 'quran_reader_hijri_adjust_v1';
+
+// Real dua recordings. Put files in public/audio/duas/ named after each dua id
+// (e.g. home-enter.mp3, sleep-before.mp3) and they are used automatically.
+// A dua can also set its own `audio` URL. Set to '' to disable file lookup.
+const DUA_AUDIO_BASE = '/audio/duas/';
 
 const DUA_CATEGORIES = [
   { key: 'home', label: 'Home & Daily Life', icon: Home, color: 'sky' },
@@ -526,7 +533,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // ---------------- Surah list ----------------
@@ -635,6 +642,13 @@ export default function QuranApp() {
   const [loopTarget, setLoopTarget] = useState(3); // desired repeat count; Infinity for "loop forever"
   const [loopRemaining, setLoopRemaining] = useState(0); // >0 while a loop is actively playing; 0 = not looping
 
+  // Bismillah is recited before every surah except Al-Fatihah (where it is
+  // ayah 1) and At-Tawbah (which has none). Fetched per reciter so the voice matches.
+  const [bismillahUrl, setBismillahUrl] = useState('');
+  const [bismillahActive, setBismillahActive] = useState(false); // for the player label
+  const bismillahPlayingRef = useRef(false);
+  const skipBismillahRef = useRef(false); // true when landing on ayah 1 via prev / reciter switch
+
   const audioRef = useRef(null);
   const ayahRefs = useRef({});
   const requestIdRef = useRef(0);
@@ -686,6 +700,25 @@ export default function QuranApp() {
   useEffect(() => {
     fetchSurahList();
   }, [fetchSurahList]);
+
+  // ---------------- Fetch: Bismillah audio for the chosen reciter ----------------
+  useEffect(() => {
+    let cancelled = false;
+    setBismillahUrl('');
+    fetch(`${API_BASE}/ayah/1/${reciter}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (cancelled) return;
+        const d = data?.data;
+        setBismillahUrl(d?.audio || d?.audioSecondary?.[0] || '');
+      })
+      .catch(() => {
+        if (!cancelled) setBismillahUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reciter]);
 
   // ---------------- Fetch: Ayahs for a Surah ----------------
   const fetchAyahs = useCallback(
@@ -747,6 +780,7 @@ export default function QuranApp() {
             resumeRef.current = null;
             const idx = merged.findIndex((a) => a.numberInSurah === numberInSurah);
             if (idx >= 0) {
+              skipBismillahRef.current = true; // resuming, not starting fresh
               setCurrentAyahIdx(idx);
               setIsPlaying(wasPlaying);
             }
@@ -974,11 +1008,38 @@ export default function QuranApp() {
       return;
     }
 
-    if (audioRef.current.src !== currentAudioUrl) {
-      audioRef.current.src = currentAudioUrl;
-    }
-    if (isPlaying) {
-      audioRef.current.play().catch(() => setIsPlaying(false));
+    const skipBism = skipBismillahRef.current;
+    skipBismillahRef.current = false;
+    const needsBismillah =
+      isPlaying &&
+      !skipBism &&
+      loopRemaining === 0 &&
+      currentAyahIdx === 0 &&
+      currentAyah.numberInSurah === 1 &&
+      surahMeta &&
+      surahMeta.number !== 1 &&
+      surahMeta.number !== 9 &&
+      !!bismillahUrl;
+
+    if (needsBismillah) {
+      // Recite the Bismillah first; handleEnded then moves on to ayah 1.
+      bismillahPlayingRef.current = true;
+      setBismillahActive(true);
+      audioRef.current.src = bismillahUrl;
+      audioRef.current.play().catch(() => {
+        bismillahPlayingRef.current = false;
+        setBismillahActive(false);
+        setIsPlaying(false);
+      });
+    } else {
+      bismillahPlayingRef.current = false;
+      setBismillahActive(false);
+      if (audioRef.current.src !== currentAudioUrl) {
+        audioRef.current.src = currentAudioUrl;
+      }
+      if (isPlaying) {
+        audioRef.current.play().catch(() => setIsPlaying(false));
+      }
     }
 
     if (surahMeta) {
@@ -996,7 +1057,31 @@ export default function QuranApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentAyahIdx, currentAudioUrl]);
 
+  // Replays whatever ayah is current from the start. Needed because setting the
+  // same ayah index again does not re-run the audio effect — this is why a
+  // single-ayah loop used to stall after the first play.
+  const restartCurrentAudio = () => {
+    const a = audioRef.current;
+    if (!a || !currentAudioUrl) return;
+    bismillahPlayingRef.current = false;
+    setBismillahActive(false);
+    if (a.src !== currentAudioUrl) a.src = currentAudioUrl;
+    a.currentTime = 0;
+    a.play().catch(() => setIsPlaying(false));
+  };
+
   const handleAudioError = () => {
+    if (bismillahPlayingRef.current) {
+      // Bismillah recording failed — skip it and go straight to the ayah.
+      bismillahPlayingRef.current = false;
+      setBismillahActive(false);
+      setBismillahUrl('');
+      if (audioRef.current && currentAudioUrl) {
+        audioRef.current.src = currentAudioUrl;
+        audioRef.current.play().catch(() => setIsPlaying(false));
+      }
+      return;
+    }
     // A specific recording failed to load/play (missing file, network blip,
     // etc.) — try skipping ahead, but the streak counter stops it from
     // cascading unchecked if the whole reciter is broken.
@@ -1031,6 +1116,12 @@ export default function QuranApp() {
     audioFailStreakRef.current = 0;
     setAudioWarning(null);
     setLoopRemaining(0); // manual selection overrides an active loop
+    if (idx === currentAyahIdx) {
+      // Same ayah again: the index won't change, so restart it directly.
+      setIsPlaying(true);
+      restartCurrentAudio();
+      return;
+    }
     setCurrentAyahIdx(idx);
     setIsPlaying(true);
   };
@@ -1048,6 +1139,7 @@ export default function QuranApp() {
   const handlePrev = () => {
     setLoopRemaining(0);
     if (currentAyahIdx > 0) {
+      skipBismillahRef.current = true; // stepping back to ayah 1 shouldn't re-recite Bismillah
       setCurrentAyahIdx((i) => i - 1);
       setIsPlaying(true);
     }
@@ -1081,8 +1173,12 @@ export default function QuranApp() {
     setAudioWarning(null);
     setSelectMode(false);
     setLoopRemaining(loopTarget === Infinity ? Infinity : loopTarget);
-    setCurrentAyahIdx(startIdx);
     setIsPlaying(true);
+    if (startIdx === currentAyahIdx) {
+      restartCurrentAudio(); // e.g. single ayah that is already loaded
+    } else {
+      setCurrentAyahIdx(startIdx);
+    }
   };
 
   const stopLoop = () => {
@@ -1090,6 +1186,16 @@ export default function QuranApp() {
   };
 
   const handleEnded = () => {
+    if (bismillahPlayingRef.current) {
+      // Bismillah finished — now the surah's first ayah.
+      bismillahPlayingRef.current = false;
+      setBismillahActive(false);
+      if (audioRef.current && currentAudioUrl) {
+        audioRef.current.src = currentAudioUrl;
+        audioRef.current.play().catch(() => setIsPlaying(false));
+      }
+      return;
+    }
     if (loopRemaining > 0 && rangeStart !== null) {
       const rangeEndValue = rangeEnd ?? rangeStart;
       const finishedAyah = ayahs[currentAyahIdx];
@@ -1104,8 +1210,12 @@ export default function QuranApp() {
         }
         const startIdx = ayahs.findIndex((a) => a.numberInSurah === rangeStart);
         setLoopRemaining(nextRemaining);
-        setCurrentAyahIdx(startIdx >= 0 ? startIdx : currentAyahIdx);
         setIsPlaying(true);
+        if (startIdx < 0 || startIdx === currentAyahIdx) {
+          restartCurrentAudio(); // single-ayah loop: same index, so restart directly
+        } else {
+          setCurrentAyahIdx(startIdx);
+        }
         return;
       }
       // Still inside the range — continue to the next ayah normally.
@@ -1369,7 +1479,7 @@ export default function QuranApp() {
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
                 className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                  section === 'progress' || section === 'learn'
+                  section === 'progress' || section === 'learn' || section === 'hijri'
                     ? `${t.accentBg} text-white`
                     : `${t.textMuted} ${t.hoverSoft}`
                 }`}
@@ -1384,6 +1494,17 @@ export default function QuranApp() {
                   <div
                     className={`absolute top-full right-0 mt-2 w-44 rounded-xl border shadow-lg z-50 overflow-hidden ${t.cardBg} ${t.headerBg}`}
                   >
+                    <button
+                      onClick={() => {
+                        setSection('hijri');
+                        setShowMoreMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left ${t.hoverSoft} ${
+                        section === 'hijri' ? t.accent : ''
+                      }`}
+                    >
+                      <CalendarDays size={15} /> Hijri Calendar
+                    </button>
                     <button
                       onClick={() => {
                         setSection('progress');
@@ -1739,7 +1860,7 @@ export default function QuranApp() {
                         <div className="flex items-center gap-2 text-sm min-w-0">
                           <Repeat size={16} className={`${t.accent} shrink-0`} />
                           <span className="truncate">
-                            Looping Ayah {rangeStart}–{rangeEnd ?? rangeStart} ·{' '}
+                            Looping Ayah {rangeEnd === null || rangeEnd === rangeStart ? rangeStart : `${rangeStart}–${rangeEnd}`} ·{' '}
                             {loopRemaining === Infinity
                               ? 'repeating forever'
                               : `${loopRemaining} repeat${loopRemaining === 1 ? '' : 's'} left`}
@@ -1759,14 +1880,16 @@ export default function QuranApp() {
                             {rangeStart === null
                               ? 'Tap an ayah to start your selection'
                               : rangeEnd === null
-                              ? `Start: Ayah ${rangeStart} — tap another ayah to set the end`
+                              ? `Ayah ${rangeStart} selected — loop just this one, or tap another ayah for a range`
+                              : rangeEnd === rangeStart
+                              ? `Ayah ${rangeStart} selected`
                               : `Ayah ${rangeStart}–${rangeEnd} selected`}
                           </span>
                           <button onClick={clearSelection} className={`text-xs ${t.textMuted} hover:underline shrink-0`}>
                             Cancel
                           </button>
                         </div>
-                        {rangeStart !== null && rangeEnd !== null && (
+                        {rangeStart !== null && (
                           <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
                             <div className="flex items-center gap-2">
                               <span className={`text-xs ${t.textMuted}`}>Repeat</span>
@@ -1804,7 +1927,7 @@ export default function QuranApp() {
                               onClick={startLoop}
                               className={`text-xs px-4 py-1.5 rounded-full ${t.accentBg} text-white`}
                             >
-                              Start Loop
+                              {rangeEnd === null || rangeEnd === rangeStart ? `Loop Ayah ${rangeStart}` : 'Start Loop'}
                             </button>
                           </div>
                         )}
@@ -1816,7 +1939,7 @@ export default function QuranApp() {
                           className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border ${t.divider} ${t.textMuted} ${t.hoverSoft}`}
                         >
                           <Repeat size={13} />
-                          Loop a range for memorization
+                          Loop an ayah or range for memorization
                         </button>
                       </div>
                     )}
@@ -2068,7 +2191,11 @@ export default function QuranApp() {
                       <div className="min-w-0 flex-1 relative">
                         <div className="text-sm font-medium truncate">
                           {surahMeta?.englishName}
-                          {currentAyahIdx >= 0 ? ` · Ayah ${ayahs[currentAyahIdx]?.numberInSurah}` : ''}
+                          {currentAyahIdx >= 0
+                            ? bismillahActive
+                              ? ' · Bismillah'
+                              : ` · Ayah ${ayahs[currentAyahIdx]?.numberInSurah}`
+                            : ''}
                         </div>
                         <button
                           onClick={() => setShowReciterPicker((v) => !v)}
@@ -2184,6 +2311,8 @@ export default function QuranApp() {
         <PrayerSection t={t} isDark={isDark} />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
+      ) : section === 'hijri' ? (
+        <HijriCalendarSection t={t} isDark={isDark} />
       ) : section === 'progress' ? (
         <ProgressSection
           t={t}
@@ -2255,18 +2384,19 @@ export default function QuranApp() {
               section === 'quran' && ayahs.length > 0 ? '0px' : 'max(0.75rem, env(safe-area-inset-bottom))',
           }}
         >
-          <div className={`pointer-events-auto max-w-sm mx-auto flex items-center justify-around rounded-full p-1.5 ${t.glassPanel}`}>
+          <div className={`pointer-events-auto max-w-md mx-auto flex items-center justify-around rounded-full p-1.5 ${t.glassPanel}`}>
             {[
               { key: 'quran', label: "Qur'an", icon: BookOpen },
               { key: 'prayer', label: 'Prayer', icon: Clock },
               { key: 'duas', label: 'Duas', icon: Sparkles },
+              { key: 'hijri', label: 'Hijri', icon: CalendarDays },
               { key: 'progress', label: 'Progress', icon: Target },
               { key: 'learn', label: 'Learn', icon: GraduationCap },
             ].map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
                 onClick={() => setSection(key)}
-                className={`flex flex-col items-center gap-0.5 px-3.5 py-1.5 rounded-full transition ${
+                className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-full transition ${
                   section === key ? `${t.accentBg} text-white` : t.textMuted
                 }`}
                 aria-label={label}
@@ -3675,6 +3805,433 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
   );
 }
 
+/* ==================== Dua audio ==================== */
+
+// Only one dua plays at a time — starting another stops whichever is active.
+let stopActiveDuaAudio = null;
+
+// Plays a dua. If the dua object has an `audio` URL (a real recording you are
+// licensed to use), that is played. Otherwise the browser's built-in Arabic
+// text-to-speech voice reads the Arabic text, so every dua has working audio
+// with no files to host. Voice quality depends on the device.
+function DuaAudioButton({ dua, t, onMessage }) {
+  const [status, setStatus] = useState('idle'); // 'idle' | 'playing'
+  const audioElRef = useRef(null);
+
+  const stop = useCallback(() => {
+    if (audioElRef.current) {
+      audioElRef.current.onerror = null;
+      audioElRef.current.pause();
+      audioElRef.current = null;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    setStatus('idle');
+  }, []);
+
+  // Stop on unmount (e.g. collapsing the card or switching sections).
+  useEffect(
+    () => () => {
+      if (stopActiveDuaAudio === stop) stopActiveDuaAudio = null;
+      if (audioElRef.current) {
+        audioElRef.current.onerror = null;
+        audioElRef.current.pause();
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    },
+    [stop]
+  );
+
+  const speak = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      onMessage('No recording found and this browser has no text-to-speech.');
+      return;
+    }
+    const synth = window.speechSynthesis;
+    const voices = synth.getVoices();
+    const arabicVoice = voices.find((v) => v.lang && v.lang.toLowerCase().startsWith('ar'));
+    if (voices.length > 0 && !arabicVoice) {
+      onMessage(
+        'No Arabic voice on this device. Try Microsoft Edge (it includes free Arabic voices), or add Arabic under Windows Settings › Time & language › Speech. Or add a recording for this dua.'
+      );
+      return;
+    }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(dua.arabic);
+    u.lang = arabicVoice?.lang || 'ar-SA';
+    if (arabicVoice) u.voice = arabicVoice;
+    u.rate = 0.8; // slower, easier to follow
+    u.onend = () => setStatus('idle');
+    u.onerror = () => setStatus('idle');
+    synth.speak(u);
+    setStatus('playing');
+  };
+
+  const play = () => {
+    if (status === 'playing') {
+      stop();
+      return;
+    }
+    onMessage('');
+    if (stopActiveDuaAudio && stopActiveDuaAudio !== stop) stopActiveDuaAudio();
+    stopActiveDuaAudio = stop;
+
+    // 1) A real recording, if one exists; otherwise 2) text-to-speech.
+    const url = dua.audio || (DUA_AUDIO_BASE ? `${DUA_AUDIO_BASE}${dua.id}.mp3` : '');
+    if (!url) {
+      speak();
+      return;
+    }
+    const el = new Audio(url);
+    audioElRef.current = el;
+    let fellBack = false;
+    const fallBack = () => {
+      if (fellBack) return;
+      fellBack = true;
+      audioElRef.current = null;
+      setStatus('idle');
+      speak();
+    };
+    el.onended = () => setStatus('idle');
+    el.onerror = fallBack; // file missing / undecodable
+    el.play().then(() => setStatus('playing')).catch(fallBack);
+  };
+
+  return (
+    <button
+      onClick={play}
+      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+      aria-label={status === 'playing' ? 'Stop dua audio' : 'Play dua audio'}
+    >
+      {status === 'playing' ? <Pause size={13} /> : <Volume2 size={13} />}
+      {status === 'playing' ? 'Stop' : 'Listen'}
+    </button>
+  );
+}
+
+/* ==================== Hijri (Islamic) calendar ==================== */
+
+const HIJRI_MONTHS = [
+  { en: 'Muharram', ar: 'مُحَرَّم' },
+  { en: 'Safar', ar: 'صَفَر' },
+  { en: "Rabi' al-Awwal", ar: 'رَبِيع الأَوَّل' },
+  { en: "Rabi' al-Thani", ar: 'رَبِيع الآخِر' },
+  { en: 'Jumada al-Ula', ar: 'جُمَادَى الأُولَى' },
+  { en: 'Jumada al-Thani', ar: 'جُمَادَى الآخِرَة' },
+  { en: 'Rajab', ar: 'رَجَب' },
+  { en: "Sha'ban", ar: 'شَعْبَان' },
+  { en: 'Ramadan', ar: 'رَمَضَان' },
+  { en: 'Shawwal', ar: 'شَوَّال' },
+  { en: "Dhu al-Qi'dah", ar: 'ذُو القَعْدَة' },
+  { en: 'Dhu al-Hijjah', ar: 'ذُو الحِجَّة' },
+];
+const WEEKDAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+// Umm al-Qura is the official Saudi calendar; fall back to the tabular
+// "civil" Islamic calendar if the browser lacks it.
+const HIJRI_CAL = (() => {
+  for (const cal of ['islamic-umalqura', 'islamic-civil']) {
+    try {
+      if (new Intl.DateTimeFormat(`en-u-ca-${cal}`).resolvedOptions().calendar === cal) return cal;
+    } catch (e) {
+      /* try the next one */
+    }
+  }
+  return null;
+})();
+const HIJRI_FMT = HIJRI_CAL
+  ? new Intl.DateTimeFormat(`en-u-ca-${HIJRI_CAL}`, { day: 'numeric', month: 'numeric', year: 'numeric' })
+  : null;
+
+// Dates are pinned to noon so DST changes can never shift the day.
+function hjDate(y, m, d) {
+  return new Date(y, m, d, 12);
+}
+function hjAddDays(date, n) {
+  return hjDate(date.getFullYear(), date.getMonth(), date.getDate() + n);
+}
+function toHijri(date, adjust = 0) {
+  const parts = HIJRI_FMT.formatToParts(hjAddDays(date, adjust));
+  const get = (type) => parseInt(parts.find((p) => p.type === type)?.value, 10);
+  return { y: get('year'), m: get('month'), d: get('day') };
+}
+function firstOfHijriMonth(date, adjust = 0) {
+  const { d } = toHijri(date, adjust);
+  return hjAddDays(date, -(d - 1));
+}
+function hijriMonthLength(first, adjust = 0) {
+  return toHijri(hjAddDays(first, 29), adjust).d === 1 ? 29 : 30;
+}
+function toArabicDigits(n) {
+  return String(n).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
+}
+
+// kind: 'major' = holiday / key date, 'minor' = recommended-worship day
+function hijriEventsFor(m, d) {
+  const ev = [];
+  if (m === 1 && d === 1) ev.push({ label: 'Islamic New Year', kind: 'major' });
+  if (m === 1 && d === 10) ev.push({ label: 'Day of Ashura', kind: 'major' });
+  if (m === 7 && d === 27) ev.push({ label: "Isra' and Mi'raj (traditionally 27 Rajab)", kind: 'major' });
+  if (m === 9 && d === 1) ev.push({ label: 'Ramadan begins', kind: 'major' });
+  if (m === 9 && [21, 23, 25, 27, 29].includes(d))
+    ev.push({ label: `Odd night of the last 10 (${d}) — Laylat al-Qadr is sought`, kind: 'major' });
+  if (m === 10 && d === 1) ev.push({ label: 'Eid al-Fitr', kind: 'major' });
+  if (m === 12 && d >= 1 && d <= 8) ev.push({ label: 'First 10 days of Dhu al-Hijjah', kind: 'minor' });
+  if (m === 12 && d === 9) ev.push({ label: 'Day of Arafah', kind: 'major' });
+  if (m === 12 && d === 10) ev.push({ label: 'Eid al-Adha', kind: 'major' });
+  if (m === 12 && d >= 11 && d <= 13) ev.push({ label: 'Days of Tashreeq', kind: 'minor' });
+  if (d >= 13 && d <= 15) ev.push({ label: 'White Days (Ayyam al-Bid)', kind: 'minor' });
+  return ev;
+}
+
+function HijriCalendarSection({ t, isDark }) {
+  const [adjust, setAdjust] = useState(() => {
+    const v = parseInt(localStorage.getItem(LS_HIJRI_ADJUST), 10);
+    return [-1, 0, 1].includes(v) ? v : 0;
+  });
+  const [monthStart, setMonthStart] = useState(() => firstOfHijriMonth(new Date(), adjust));
+  const [selected, setSelected] = useState(null); // Date
+
+  useEffect(() => {
+    localStorage.setItem(LS_HIJRI_ADJUST, String(adjust));
+    setMonthStart(firstOfHijriMonth(new Date(), adjust));
+    setSelected(null);
+  }, [adjust]);
+
+  const today = useMemo(() => new Date(), []);
+  const todayHijri = useMemo(() => (HIJRI_FMT ? toHijri(today, adjust) : null), [today, adjust]);
+
+  const month = useMemo(() => {
+    if (!HIJRI_FMT) return null;
+    const h = toHijri(monthStart, adjust);
+    const length = hijriMonthLength(monthStart, adjust);
+    const cells = [];
+    for (let i = 0; i < monthStart.getDay(); i++) cells.push(null);
+    for (let i = 0; i < length; i++) cells.push(hjAddDays(monthStart, i));
+    return { h, length, cells, last: hjAddDays(monthStart, length - 1) };
+  }, [monthStart, adjust]);
+
+  // Next occurrences of the major dates over the coming year.
+  const upcoming = useMemo(() => {
+    if (!HIJRI_FMT) return [];
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; i < 400 && out.length < 6; i++) {
+      const date = hjAddDays(today, i);
+      const h = toHijri(date, adjust);
+      hijriEventsFor(h.m, h.d)
+        .filter((e) => e.kind === 'major' && !e.label.startsWith('Odd night'))
+        .forEach((e) => {
+          const key = `${e.label}-${h.y}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          out.push({ ...e, date, h, inDays: i });
+        });
+    }
+    return out;
+  }, [today, adjust]);
+
+  const goMonth = (dir) => {
+    setSelected(null);
+    if (dir > 0) setMonthStart(hjAddDays(monthStart, month.length));
+    else {
+      const prevLast = hjAddDays(monthStart, -1);
+      setMonthStart(firstOfHijriMonth(prevLast, adjust));
+    }
+  };
+
+  const fmtGreg = (d, opts) => d.toLocaleDateString('en-GB', opts);
+  const isSameDay = (a, b) => a && b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+  if (!HIJRI_FMT) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 md:px-8 py-10 text-center">
+        <AlertCircle className="mx-auto mb-2 text-red-500" size={24} />
+        <p className={`text-sm ${t.textMuted}`}>
+          This browser does not support the Islamic calendar. Please update your browser to see Hijri dates.
+        </p>
+      </div>
+    );
+  }
+
+  const todayMonthName = HIJRI_MONTHS[todayHijri.m - 1];
+  const selectedInfo = selected ? { h: toHijri(selected, adjust), date: selected } : null;
+  const selectedEvents = selectedInfo ? hijriEventsFor(selectedInfo.h.m, selectedInfo.h.d) : [];
+  const monthName = HIJRI_MONTHS[month.h.m - 1];
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-28">
+      {/* Today */}
+      <div className={`rounded-3xl border px-5 py-6 mb-5 text-center ${t.cardActive}`}>
+        <div className={`text-xs uppercase tracking-wider mb-2 ${t.textMuted}`}>Today</div>
+        <div className="font-arabic text-3xl mb-1" dir="rtl">
+          {WEEKDAYS_AR[today.getDay()]}، {toArabicDigits(todayHijri.d)} {todayMonthName.ar} {toArabicDigits(todayHijri.y)} هـ
+        </div>
+        <div className="text-lg font-semibold">
+          {todayHijri.d} {todayMonthName.en} {todayHijri.y} AH
+        </div>
+        <div className={`text-sm mt-1 ${t.textMuted}`}>
+          {fmtGreg(today, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+        </div>
+        {hijriEventsFor(todayHijri.m, todayHijri.d).map((e) => (
+          <div key={e.label} className={`text-xs mt-2 ${t.accent}`}>
+            ✦ {e.label}
+          </div>
+        ))}
+      </div>
+
+      {/* Month grid */}
+      <div className={`rounded-3xl border p-4 mb-5 ${t.cardBg}`}>
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={() => goMonth(-1)} className={`p-2 rounded-full ${t.hoverSoft}`} aria-label="Previous month">
+            <ChevronLeft size={18} />
+          </button>
+          <div className="text-center">
+            <div className="text-base font-semibold">
+              {monthName.en} {month.h.y} AH
+            </div>
+            <div className="font-arabic text-lg leading-tight" dir="rtl">
+              {monthName.ar} {toArabicDigits(month.h.y)}
+            </div>
+            <div className={`text-[11px] ${t.textFaint}`}>
+              {fmtGreg(monthStart, { day: 'numeric', month: 'short' })} – {fmtGreg(month.last, { day: 'numeric', month: 'short', year: 'numeric' })}
+            </div>
+          </div>
+          <button onClick={() => goMonth(1)} className={`p-2 rounded-full ${t.hoverSoft}`} aria-label="Next month">
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 mb-1">
+          {WEEKDAYS_EN.map((w, i) => (
+            <div key={w} className={`text-center text-[11px] py-1 ${i === 5 ? t.accent : t.textFaint}`}>
+              {w}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {month.cells.map((date, i) => {
+            if (!date) return <div key={`b${i}`} />;
+            const h = toHijri(date, adjust);
+            const ev = hijriEventsFor(h.m, h.d);
+            const hasMajor = ev.some((e) => e.kind === 'major');
+            const hasMinor = ev.some((e) => e.kind === 'minor');
+            const isToday = isSameDay(date, today);
+            const isSel = isSameDay(date, selected);
+            return (
+              <button
+                key={i}
+                onClick={() => setSelected(date)}
+                className={`relative aspect-square rounded-xl flex flex-col items-center justify-center border transition ${
+                  isToday
+                    ? `${t.accentBg} text-white border-transparent`
+                    : isSel
+                    ? `${t.cardActive}`
+                    : `border-transparent ${t.hoverSoft}`
+                }`}
+                aria-label={`${h.d} ${HIJRI_MONTHS[h.m - 1].en}`}
+              >
+                <span className="text-sm font-semibold leading-none">{h.d}</span>
+                <span className={`text-[9px] mt-0.5 leading-none ${isToday ? 'text-white/80' : t.textFaint}`}>
+                  {date.getDate()}
+                </span>
+                {(hasMajor || hasMinor) && (
+                  <span
+                    className={`absolute bottom-1 w-1 h-1 rounded-full ${
+                      hasMajor ? 'bg-amber-500' : isToday ? 'bg-white/70' : 'bg-emerald-500/70'
+                    }`}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className={`flex items-center gap-4 mt-3 text-[11px] ${t.textMuted}`}>
+          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Key date</span>
+          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500/70" /> Recommended day</span>
+          <span className="ml-auto">Big number = Hijri, small = Gregorian</span>
+        </div>
+
+        <div className="flex justify-center mt-3">
+          <button
+            onClick={() => {
+              setMonthStart(firstOfHijriMonth(new Date(), adjust));
+              setSelected(null);
+            }}
+            className={`text-xs px-3 py-1.5 rounded-full border ${t.divider} ${t.hoverSoft}`}
+          >
+            Jump to today
+          </button>
+        </div>
+      </div>
+
+      {/* Selected day */}
+      {selectedInfo && (
+        <div className={`rounded-3xl border px-4 py-4 mb-5 ${t.cardBg}`}>
+          <div className="text-sm font-semibold">
+            {selectedInfo.h.d} {HIJRI_MONTHS[selectedInfo.h.m - 1].en} {selectedInfo.h.y} AH
+          </div>
+          <div className={`text-xs ${t.textMuted} mb-2`}>
+            {fmtGreg(selectedInfo.date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+          {selectedEvents.length === 0 ? (
+            <p className={`text-xs ${t.textFaint}`}>No special dates on this day.</p>
+          ) : (
+            selectedEvents.map((e) => (
+              <p key={e.label} className="text-sm">
+                <span className={e.kind === 'major' ? 'text-amber-500' : 'text-emerald-500'}>✦</span> {e.label}
+              </p>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Upcoming */}
+      <div className={`rounded-3xl border px-4 py-4 mb-5 ${t.cardBg}`}>
+        <h2 className="text-sm font-semibold mb-3">Upcoming</h2>
+        <div className="space-y-2.5">
+          {upcoming.map((e) => (
+            <div key={`${e.label}-${e.h.y}`} className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm truncate">{e.label}</div>
+                <div className={`text-xs ${t.textMuted}`}>
+                  {e.h.d} {HIJRI_MONTHS[e.h.m - 1].en} {e.h.y} · {fmtGreg(e.date, { day: 'numeric', month: 'short', year: 'numeric' })}
+                </div>
+              </div>
+              <span className={`text-xs shrink-0 ${t.accent}`}>
+                {e.inDays === 0 ? 'Today' : e.inDays === 1 ? 'Tomorrow' : `in ${e.inDays} days`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Adjustment */}
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h2 className="text-sm font-semibold mb-1">Adjust for local moon sighting</h2>
+        <p className={`text-xs mb-3 leading-relaxed ${t.textMuted}`}>
+          Dates use the {HIJRI_CAL === 'islamic-umalqura' ? 'Umm al-Qura' : 'tabular Islamic'} calendar. Your local
+          community may start a month a day earlier or later, so you can shift every date by one day. Islamic days begin
+          at sunset, so the "night of" a date starts the evening before.
+        </p>
+        <div className={`inline-flex items-center gap-1 rounded-full border ${t.divider} p-0.5`}>
+          {[-1, 0, 1].map((v) => (
+            <button
+              key={v}
+              onClick={() => setAdjust(v)}
+              className={`px-3.5 py-1 rounded-full text-xs ${adjust === v ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`}`}
+            >
+              {v === 0 ? 'No shift' : v > 0 ? '+1 day' : '−1 day'}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ==================== Duas: everyday occasion-based supplications ==================== */
 
 // Full literal Tailwind class strings per category color — constructing these
@@ -3714,6 +4271,7 @@ function DuasSection({ t, isDark }) {
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [expanded, setExpanded] = useState(null);
   const [copiedId, setCopiedId] = useState(null);
+  const [audioMsg, setAudioMsg] = useState({ id: null, text: '' });
   const [favorites, setFavorites] = useState(() => loadJSON(LS_DUA_FAVORITES, {}));
 
   useEffect(() => {
@@ -3862,13 +4420,19 @@ function DuasSection({ t, isDark }) {
                     <p className={`text-sm italic ${t.textMuted} mb-2 leading-relaxed`}>{dua.translit}</p>
                     <p className={`text-sm mb-2 leading-relaxed ${t.text}`}>{dua.translation}</p>
                     {dua.note && <p className={`text-xs ${t.textMuted} mb-3 leading-relaxed`}>{dua.note}</p>}
-                    <button
-                      onClick={() => copyDua(dua)}
-                      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
-                    >
-                      {copiedId === dua.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
-                      {copiedId === dua.id ? 'Copied' : 'Copy'}
-                    </button>
+                    <div className="flex items-start gap-2 flex-wrap">
+                      <DuaAudioButton dua={dua} t={t} onMessage={(text) => setAudioMsg({ id: dua.id, text })} />
+                      <button
+                        onClick={() => copyDua(dua)}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                      >
+                        {copiedId === dua.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                        {copiedId === dua.id ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
+                    {audioMsg.id === dua.id && audioMsg.text && (
+                      <p className="text-xs text-red-500 mt-2 leading-snug">{audioMsg.text}</p>
+                    )}
                   </div>
                 )}
               </div>
