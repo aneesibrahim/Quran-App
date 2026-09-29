@@ -56,7 +56,8 @@ function buildTextEditions(translationEdition) {
 }
 
 const ADHAN_API = 'https://api.aladhan.com/v1';
-const PRAYER_METHOD = 2; // Islamic Society of North America (ISNA); change if a different convention is preferred
+// No fixed calculation method: when `method` is omitted, the Aladhan API picks the
+// authority closest to the coordinates (e.g. Gulf/Umm al-Qura region, Karachi, ISNA...).
 const KAABA = { lat: 21.4225, lon: 39.8262 };
 
 const LS_BOOKMARKS = 'quran_reader_bookmarks_v1';
@@ -318,14 +319,16 @@ function addDays(dateKey, days) {
   return d;
 }
 
-// Optional: point this at an Adhan (call to prayer) recording you have the
-// rights to use — e.g. a file you add to your project's `public/` folder
-// (then set this to '/adhan.mp3') or a URL you trust. There is no reliable,
-// well-documented free public API for Adhan *audio* the way there is for
-// Quran recitation, so none is bundled by default. Leave this blank and the
-// app will play a short generated reminder chime instead, and always show
-// the full Azan text below.
-const ADHAN_AUDIO_URL = '';
+// The Azan recording played at prayer times. Add a file you have the rights to
+// use to your project's `public/` folder as `adhan.mp3` (or change this path,
+// e.g. '/adhan.ogg'). A CC0 (public domain) option: search Wikimedia Commons
+// for "Beautiful adhan.ogg" — listen to it first, then save it as public/adhan.ogg
+// and set this to '/adhan.ogg'. If the file is missing, the app plays a short
+// chime instead, so reminders never fail silently.
+const ADHAN_AUDIO_URL = '/adhan.mp3';
+const LS_REMINDERS_FIRED = 'quran_reader_prayer_fired_v1';
+const REMINDER_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+const REMINDER_GRACE_MIN = 2; // still fire if the tab was throttled/asleep for up to this long
 
 const AZAN_LINES = [
   { arabic: 'اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ', translit: 'Allahu Akbar, Allahu Akbar', translation: 'Allah is the Greatest, Allah is the Greatest', repeat: 2 },
@@ -497,6 +500,21 @@ function to12h(timeStr) {
   return `${h}:${mStr} ${suffix}`;
 }
 
+// Current date (YYYY-MM-DD) and minutes-since-midnight in a given IANA
+// timezone. Prayer times from the API are in the *prayer location's* local
+// time, which is not necessarily the device's timezone.
+function zonedNow(tz) {
+  const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', tz ? { ...opts, timeZone: tz } : opts).formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(new Date());
+  }
+  const g = (type) => parts.find((p) => p.type === type)?.value || '0';
+  return { date: `${g('year')}-${g('month')}-${g('day')}`, minutes: (parseInt(g('hour'), 10) % 24) * 60 + parseInt(g('minute'), 10) };
+}
+
 function playReminderChime() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -535,6 +553,165 @@ export default function QuranApp() {
   // ---------------- App section ----------------
   const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
+  const [prayerLocation, setPrayerLocation] = useState(() => loadJSON(LS_PRAYER_LOCATION, null)); // {lat, lon, label}
+  const [remindersOn, setRemindersOn] = useState(() => loadJSON(LS_REMINDERS, false));
+  const [azanPlaying, setAzanPlaying] = useState(false);
+  const [adhanReady, setAdhanReady] = useState(false); // true once the Azan file has loaded
+  const adhanAudioRef = useRef(null);
+
+  useEffect(() => {
+    if (prayerLocation) localStorage.setItem(LS_PRAYER_LOCATION, JSON.stringify(prayerLocation));
+  }, [prayerLocation]);
+  useEffect(() => {
+    localStorage.setItem(LS_REMINDERS, JSON.stringify(remindersOn));
+  }, [remindersOn]);
+
+  // If location permission was already granted, quietly re-check position when the
+  // app opens or returns to the foreground, so prayer times follow you when you
+  // travel. A city you searched for manually is never overwritten.
+  useEffect(() => {
+    if (!navigator.geolocation || !navigator.permissions?.query) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const st = await navigator.permissions.query({ name: 'geolocation' });
+        if (st.state !== 'granted') return;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (cancelled) return;
+            const { latitude: lat, longitude: lon } = pos.coords;
+            setPrayerLocation((prev) => {
+              if (prev && prev.label !== 'Current location') return prev;
+              if (prev && haversineKm(prev.lat, prev.lon, lat, lon) < 10) return prev;
+              return { lat, lon, label: 'Current location' };
+            });
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 }
+        );
+      } catch {
+        // Permissions API unsupported for geolocation — the manual button still works.
+      }
+    };
+    refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  const playAdhanCue = useCallback(() => {
+    const a = adhanAudioRef.current;
+    if (ADHAN_AUDIO_URL && a) {
+      a.muted = false;
+      a.currentTime = 0;
+      a.play().catch(() => playReminderChime());
+    } else {
+      playReminderChime();
+    }
+  }, []);
+
+  const stopAzan = useCallback(() => {
+    const a = adhanAudioRef.current;
+    if (a) {
+      a.pause();
+      a.currentTime = 0;
+    }
+    setAzanPlaying(false);
+  }, []);
+
+  // Runs from a tap, so the browser lets us "unlock" audio now and play it
+  // later at prayer time (browsers otherwise block sound nobody asked for).
+  const toggleReminders = async () => {
+    if (!remindersOn) {
+      const a = adhanAudioRef.current;
+      if (a) {
+        a.muted = true;
+        a.play()
+          .then(() => {
+            a.pause();
+            a.currentTime = 0;
+            a.muted = false;
+          })
+          .catch(() => {
+            a.muted = false;
+          });
+      }
+      if ('Notification' in window && Notification.permission === 'default') {
+        await Notification.requestPermission().catch(() => {});
+      }
+    }
+    setRemindersOn((v) => !v);
+  };
+
+  // Clock check every 5 s instead of one long timeout per prayer: survives
+  // background-tab throttling and sleep, and rolls over to the next day by itself.
+  useEffect(() => {
+    if (!remindersOn || !prayerLocation) return;
+    let cancelled = false;
+    let cfg = null; // { tz, date, times }
+    let fetching = false;
+    let lastFetchAt = 0;
+    let fired = new Set(loadJSON(LS_REMINDERS_FIRED, []));
+
+    const load = () => {
+      fetching = true;
+      lastFetchAt = Date.now();
+      const ts = Math.floor(Date.now() / 1000);
+      fetch(`${ADHAN_API}/timings/${ts}?latitude=${prayerLocation.lat}&longitude=${prayerLocation.lon}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          if (cancelled) return;
+          const times = {};
+          REMINDER_PRAYERS.forEach((k) => {
+            times[k] = String(data.data.timings[k]).split(' ')[0];
+          });
+          const [dd, mm, yyyy] = String(data.data.date?.gregorian?.date || '').split('-');
+          cfg = { tz: data.data.meta?.timezone, times, date: yyyy ? `${yyyy}-${mm}-${dd}` : null };
+        })
+        .catch(() => {})
+        .finally(() => {
+          fetching = false;
+        });
+    };
+
+    const tick = () => {
+      const { date, minutes } = zonedNow(cfg?.tz);
+      if ((!cfg || cfg.date !== date) && !fetching && Date.now() - lastFetchAt > 60000) load();
+      if (!cfg || cfg.date !== date) return;
+      REMINDER_PRAYERS.forEach((key) => {
+        const [h, m] = (cfg.times[key] || '').split(':').map(Number);
+        if (Number.isNaN(h) || Number.isNaN(m)) return;
+        const id = `${date}-${key}`;
+        const diff = minutes - (h * 60 + m);
+        if (diff >= 0 && diff <= REMINDER_GRACE_MIN && !fired.has(id)) {
+          fired.add(id);
+          localStorage.setItem(LS_REMINDERS_FIRED, JSON.stringify([...fired].slice(-12)));
+          playAdhanCue();
+          if ('Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`${key} — time for prayer`, { body: 'It is time for Salah.', tag: id });
+            } catch {
+              // Notification constructor can throw in some contexts — ignore.
+            }
+          }
+        }
+      });
+    };
+
+    tick();
+    const iv = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [remindersOn, prayerLocation, playAdhanCue]);
 
   // ---------------- Surah list ----------------
   const [surahList, setSurahList] = useState([]);
@@ -2308,7 +2485,18 @@ export default function QuranApp() {
           />
         </>
       ) : section === 'prayer' ? (
-        <PrayerSection t={t} isDark={isDark} />
+        <PrayerSection
+          t={t}
+          isDark={isDark}
+          location={prayerLocation}
+          setLocation={setPrayerLocation}
+          remindersOn={remindersOn}
+          toggleReminders={toggleReminders}
+          playAdhanCue={playAdhanCue}
+          stopAzan={stopAzan}
+          azanPlaying={azanPlaying}
+          adhanReady={adhanReady}
+        />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
       ) : section === 'hijri' ? (
@@ -2408,16 +2596,42 @@ export default function QuranApp() {
           </div>
         </div>
       )}
+
+      {ADHAN_AUDIO_URL && (
+        <audio
+          ref={adhanAudioRef}
+          src={ADHAN_AUDIO_URL}
+          preload="auto"
+          className="hidden"
+          onCanPlay={() => setAdhanReady(true)}
+          onError={() => setAdhanReady(false)}
+          onPlaying={(e) => {
+            if (!e.currentTarget.muted) setAzanPlaying(true);
+          }}
+          onPause={() => setAzanPlaying(false)}
+          onEnded={() => setAzanPlaying(false)}
+        />
+      )}
+      {azanPlaying && (
+        <div className="fixed top-3 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
+          <div className={`pointer-events-auto flex items-center gap-3 rounded-full pl-4 pr-2 py-2 ${t.glassPanel}`}>
+            <Volume2 size={16} className={t.accent} />
+            <span className="text-sm">Azan playing</span>
+            <button onClick={stopAzan} className={`text-xs px-3 py-1.5 rounded-full ${t.accentBg} text-white`}>
+              Stop
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ==================== Prayer (Namaz) section ==================== */
 
-function PrayerSection({ t, isDark }) {
+function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleReminders, playAdhanCue, stopAzan, azanPlaying, adhanReady }) {
   const [tab, setTab] = useState('timings'); // 'timings' | 'qibla' | 'guide'
 
-  const [location, setLocation] = useState(() => loadJSON(LS_PRAYER_LOCATION, null)); // {lat, lon, label}
   const [locLoading, setLocLoading] = useState(false);
   const [locError, setLocError] = useState(null);
   const [cityInput, setCityInput] = useState('');
@@ -2425,6 +2639,7 @@ function PrayerSection({ t, isDark }) {
 
   const [timings, setTimings] = useState(null);
   const [hijri, setHijri] = useState(null);
+  const [methodInfo, setMethodInfo] = useState(null); // { name, tz }
   const [timingsLoading, setTimingsLoading] = useState(false);
   const [timingsError, setTimingsError] = useState(null);
 
@@ -2434,18 +2649,8 @@ function PrayerSection({ t, isDark }) {
 
   const [expandedGuide, setExpandedGuide] = useState('wudu'); // 'wudu' | 'salah' | null
 
-  const [remindersOn, setRemindersOn] = useState(() => loadJSON(LS_REMINDERS, false));
-  const adhanAudioRef = useRef(null);
 
   const [now, setNow] = useState(Date.now());
-
-  useEffect(() => {
-    if (location) localStorage.setItem(LS_PRAYER_LOCATION, JSON.stringify(location));
-  }, [location]);
-
-  useEffect(() => {
-    localStorage.setItem(LS_REMINDERS, JSON.stringify(remindersOn));
-  }, [remindersOn]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30000);
@@ -2460,6 +2665,7 @@ function PrayerSection({ t, isDark }) {
     });
     setTimings(clean);
     setHijri(data.data.date?.hijri || null);
+    setMethodInfo({ name: data.data.meta?.method?.name || null, tz: data.data.meta?.timezone || null });
   };
 
   const detectLocation = () => {
@@ -2486,6 +2692,17 @@ function PrayerSection({ t, isDark }) {
     );
   };
 
+  // First visit with no saved location: ask for it automatically (the browser
+  // shows its own permission prompt) instead of waiting for a button tap.
+  const autoDetectTriedRef = useRef(false);
+  useEffect(() => {
+    if (!location && !autoDetectTriedRef.current) {
+      autoDetectTriedRef.current = true;
+      detectLocation();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const searchCity = (e) => {
     e.preventDefault();
     if (!cityInput.trim()) return;
@@ -2494,7 +2711,7 @@ function PrayerSection({ t, isDark }) {
     fetch(
       `${ADHAN_API}/timingsByCity?city=${encodeURIComponent(cityInput.trim())}&country=${encodeURIComponent(
         countryInput.trim() || ''
-      )}&method=${PRAYER_METHOD}`
+      )}`
     )
       .then((r) => {
         if (!r.ok) throw new Error('City not found. Check the spelling and try again.');
@@ -2518,7 +2735,7 @@ function PrayerSection({ t, isDark }) {
     setTimingsLoading(true);
     setTimingsError(null);
     const ts = Math.floor(Date.now() / 1000);
-    fetch(`${ADHAN_API}/timings/${ts}?latitude=${location.lat}&longitude=${location.lon}&method=${PRAYER_METHOD}`)
+    fetch(`${ADHAN_API}/timings/${ts}?latitude=${location.lat}&longitude=${location.lon}`)
       .then((r) => {
         if (!r.ok) throw new Error('Could not load prayer timings.');
         return r.json();
@@ -2544,53 +2761,6 @@ function PrayerSection({ t, isDark }) {
     const theta = (Math.atan2(y, x) * 180) / Math.PI;
     return (theta + 360) % 360;
   }, [location]);
-
-  const playAdhanCue = useCallback(() => {
-    if (ADHAN_AUDIO_URL && adhanAudioRef.current) {
-      adhanAudioRef.current.currentTime = 0;
-      adhanAudioRef.current.play().catch(() => playReminderChime());
-    } else {
-      playReminderChime();
-    }
-  }, []);
-
-  const toggleReminders = async () => {
-    if (!remindersOn && 'Notification' in window && Notification.permission === 'default') {
-      await Notification.requestPermission().catch(() => {});
-    }
-    setRemindersOn((v) => !v);
-  };
-
-  // Schedule a one-shot alert (sound + system notification, if permitted) for
-  // each of today's remaining prayer times whenever timings load or reminders
-  // are turned on. Re-runs (and reschedules) if the page is left open past
-  // midnight, since `timings` gets refetched for the new day elsewhere.
-  useEffect(() => {
-    if (!timings || !remindersOn) return;
-    const today = new Date();
-    const timers = [];
-    ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'].forEach((key) => {
-      const [h, m] = (timings[key] || '').split(':').map(Number);
-      if (Number.isNaN(h) || Number.isNaN(m)) return;
-      const d = new Date(today);
-      d.setHours(h, m, 0, 0);
-      const msUntil = d.getTime() - Date.now();
-      if (msUntil > 0 && msUntil < 24 * 60 * 60 * 1000) {
-        const id = setTimeout(() => {
-          playAdhanCue();
-          if ('Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification(`${key} — time for prayer`, { body: 'It is time for Salah.' });
-            } catch {
-              // Notification constructor can throw in some contexts (e.g. service-worker-only origins) — ignore.
-            }
-          }
-        }, msUntil);
-        timers.push(id);
-      }
-    });
-    return () => timers.forEach(clearTimeout);
-  }, [timings, remindersOn, playAdhanCue]);
 
   // Live device compass.
   // Only trust *true* absolute headings — iOS's webkitCompassHeading, or a
@@ -2734,7 +2904,10 @@ function PrayerSection({ t, isDark }) {
               <span className="text-sm truncate">
                 {location
                   ? location.label || `${location.lat.toFixed(2)}, ${location.lon.toFixed(2)}`
+                  : locLoading
+                  ? 'Detecting your location…'
                   : 'No location set'}
+                {location && methodInfo?.tz && <span className={`text-xs ${t.textMuted}`}> · {methodInfo.tz}</span>}
               </span>
             </div>
             <button
@@ -2771,7 +2944,9 @@ function PrayerSection({ t, isDark }) {
         <>
           {!location && !locLoading && (
             <p className={`text-sm ${t.textMuted} text-center py-10`}>
-              Set your location above to see today's prayer timings.
+              {locError
+                ? "We couldn't detect your location. Tap Use My Location, or search for your city above."
+                : "Set your location above to see today's prayer timings."}
             </p>
           )}
           {timingsLoading && (
@@ -2830,11 +3005,14 @@ function PrayerSection({ t, isDark }) {
               </button>
               <p className={`text-xs ${t.textMuted} mt-2 text-center`}>
                 {remindersOn
-                  ? "A chime and (if allowed) a notification will play at each remaining prayer time today, while this page stays open."
-                  : "Plays a chime and shows a notification at each prayer time, while this page stays open."}
+                  ? `${adhanReady ? 'The Azan' : 'A chime'} will play, with a notification if allowed, at every prayer time — on any screen of the app. The app must stay open in a browser tab; it cannot ring when the browser is closed or the device is asleep.`
+                  : `Plays ${adhanReady ? 'the Azan' : 'a chime'} and shows a notification at each prayer time while the app stays open in a browser tab.`}
               </p>
               <p className={`text-xs ${t.textMuted} mt-3 text-center`}>
-                Calculated using the ISNA convention. Times may differ slightly from your local mosque's schedule.
+                {methodInfo?.name
+                  ? `Method: ${methodInfo.name}, chosen automatically for your location.`
+                  : 'Calculation method chosen automatically for your location.'}{' '}
+                Times may differ slightly from your local mosque's schedule.
               </p>
             </>
           )}
@@ -2920,19 +3098,19 @@ function PrayerSection({ t, isDark }) {
                 <span className="text-sm">Play</span>
               </div>
               <button
-                onClick={() => playAdhanCue()}
+                onClick={() => (azanPlaying ? stopAzan() : playAdhanCue())}
                 className={`text-xs px-4 py-2 rounded-lg ${t.accentBg} text-white`}
               >
-                {ADHAN_AUDIO_URL ? 'Play Azan' : 'Play reminder chime'}
+                {azanPlaying ? 'Stop Azan' : adhanReady ? 'Play Azan' : 'Play reminder chime'}
               </button>
             </div>
-            {!ADHAN_AUDIO_URL && (
+            {!adhanReady && (
               <p className={`text-xs ${t.textMuted} mt-2 leading-relaxed`}>
                 There's no well-documented free public API for Adhan <em>audio</em> the way there is for Quran
-                recitation, so no recording is bundled here — this plays a short generated chime instead. If you
-                have an Adhan recording you're licensed to use, set <code>ADHAN_AUDIO_URL</code> near the top of
-                this file (e.g. to <code>/adhan.mp3</code> after adding the file to your project's{' '}
-                <code>public/</code> folder) and this button — plus prayer-time reminders — will play it instead.
+                recitation, so no recording is bundled. No Azan file was found, so a short chime plays instead. Add
+                a recording you have the rights to use as <code>public/adhan.mp3</code> (or change{' '}
+                <code>ADHAN_AUDIO_URL</code> near the top of this file) and both this button and the prayer-time
+                reminders will play it.
               </p>
             )}
           </div>
@@ -2954,7 +3132,6 @@ function PrayerSection({ t, isDark }) {
             </div>
           </div>
 
-          {ADHAN_AUDIO_URL && <audio ref={adhanAudioRef} src={ADHAN_AUDIO_URL} preload="none" className="hidden" />}
         </div>
       )}
 
