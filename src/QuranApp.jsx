@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 
 /**
+ * Copyright (c) 2026 Aneesnambiyatheyil. All rights reserved.
+ *
  * Single-file Quran reader + Prayer (Namaz) companion.
  *
  * Data sources (both from the Islamic Network's free public APIs):
@@ -328,6 +330,9 @@ function addDays(dateKey, days) {
 const ADHAN_AUDIO_URL = '/adhan.mp3';
 const LS_REMINDERS_FIRED = 'quran_reader_prayer_fired_v1';
 const LS_COMPASS_FLIP = 'quran_reader_compass_flip_v1';
+
+const COPYRIGHT_OWNER = 'Aneesnambiyatheyil';
+const COPYRIGHT_YEAR = 2026; // year of first publication — update if you want a range, e.g. '2026–2027'
 const REMINDER_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 const REMINDER_GRACE_MIN = 2; // still fire if the tab was throttled/asleep for up to this long
 
@@ -1955,6 +1960,10 @@ export default function QuranApp() {
                       </div>
                     )}
 
+                    <p className={`text-[11px] text-center mb-2 ${t.textFaint}`}>
+                      © {COPYRIGHT_YEAR} {COPYRIGHT_OWNER}. All rights reserved.
+                    </p>
+
                     <div className="space-y-1.5">
                       {filteredSurahs.map((s) => (
                         <button
@@ -1999,6 +2008,7 @@ export default function QuranApp() {
                         </p>
                       )}
                     </div>
+                    <CopyrightNotice t={t} />
                   </>
                 )}
               </div>
@@ -2538,6 +2548,8 @@ export default function QuranApp() {
       ) : (
         <LearnSection t={t} beginnerMode={beginnerMode} setBeginnerMode={setBeginnerMode} />
       )}
+
+      {section !== 'quran' && <CopyrightNotice t={t} />}
 
       {shareAyah && (
         <VerseCardModal
@@ -4042,6 +4054,22 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
         </div>
       )}
     </div>
+  );
+}
+
+/* ==================== Copyright notice ==================== */
+
+function CopyrightNotice({ t }) {
+  return (
+    <footer className={`max-w-3xl mx-auto px-4 md:px-8 pt-2 pb-28 text-center text-[11px] leading-relaxed ${t.textFaint}`}>
+      <p>
+        © {COPYRIGHT_YEAR} {COPYRIGHT_OWNER}. All rights reserved.
+      </p>
+      <p className="mt-1">
+        Quran text, translations and recitation audio are provided by Al Quran Cloud (Islamic Network) and remain
+        the property of their respective owners. Prayer times by Aladhan.
+      </p>
+    </footer>
   );
 }
 
