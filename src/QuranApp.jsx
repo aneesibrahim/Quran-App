@@ -8,7 +8,7 @@ import {
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
   Home, Shield, Users, Utensils, Star, MoreHorizontal,
   VolumeX, RotateCcw, ChevronUp, Repeat, Infinity as InfinityIcon,
-  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise,
+  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise, Eye, EyeOff,
 } from 'lucide-react';
 
 /**
@@ -72,6 +72,8 @@ const LS_KHATMAH = 'quran_reader_khatmah_v1';
 const LS_RECITER = 'quran_reader_reciter_v1';
 const LS_NOTES = 'quran_reader_notes_v1';
 const LS_BEGINNER_MODE = 'quran_reader_beginner_mode_v1';
+const LS_SHOW_TRANSLATION = 'quran_reader_show_translation_v1';
+const LS_SHOW_TRANSLIT = 'quran_reader_show_transliteration_v1';
 
 const QUICK_TAGS = ['Comfort', 'Duas from Quran', 'Guidance', 'Reflection', 'Gratitude', 'Patience'];
 
@@ -1232,6 +1234,15 @@ export default function QuranApp() {
   const [noteDraft, setNoteDraft] = useState({ text: '', tags: [] });
 
   const [beginnerMode, setBeginnerMode] = useState(() => loadJSON(LS_BEGINNER_MODE, false));
+  // Reading focus: hide the translation and/or transliteration under each ayah.
+  const [showTranslation, setShowTranslation] = useState(() => loadJSON(LS_SHOW_TRANSLATION, true));
+  const [showTransliteration, setShowTransliteration] = useState(() => loadJSON(LS_SHOW_TRANSLIT, true));
+  useEffect(() => {
+    localStorage.setItem(LS_SHOW_TRANSLATION, JSON.stringify(showTranslation));
+  }, [showTranslation]);
+  useEffect(() => {
+    localStorage.setItem(LS_SHOW_TRANSLIT, JSON.stringify(showTransliteration));
+  }, [showTransliteration]);
 
   const [shareAyah, setShareAyah] = useState(null); // { ayah, surahMeta } while the verse-card modal is open
   const [verseActionsFor, setVerseActionsFor] = useState(null); // ayah currently showing the Verse Actions sheet, or null
@@ -2174,6 +2185,21 @@ export default function QuranApp() {
 
           {section === 'quran' && (
             <button
+              onClick={() => setShowTranslation((v) => !v)}
+              className={`p-2 rounded-lg border ${t.divider} ${t.hoverSoft} flex items-center gap-1.5`}
+              title={showTranslation ? 'Hide translation (Arabic-focused reading)' : 'Show translation'}
+              aria-label={showTranslation ? 'Hide translation' : 'Show translation'}
+              aria-pressed={!showTranslation}
+            >
+              {showTranslation ? <Eye size={18} /> : <EyeOff size={18} className={t.accent} />}
+              <span className={`hidden sm:inline text-[10px] font-medium ${showTranslation ? '' : t.accent}`}>
+                {showTranslation ? 'TRANSLATION' : 'HIDDEN'}
+              </span>
+            </button>
+          )}
+
+          {section === 'quran' && (
+            <button
               onClick={() => {
                 setShowBookmarksPanel((v) => !(v && panelTab === 'bookmarks'));
                 setPanelTab('bookmarks');
@@ -2450,7 +2476,25 @@ export default function QuranApp() {
                     </h1>
                     <div className="text-lg font-semibold">{surahMeta.englishName}</div>
                     <div className={`text-sm ${t.textMuted} mb-4`}>{surahMeta.englishNameTranslation}</div>
-                    <div className="flex items-center justify-center gap-1.5">
+                    <div className="flex items-center justify-center gap-1.5 mb-2">
+                      {[
+                        ['Translation', showTranslation, setShowTranslation],
+                        ['Transliteration', showTransliteration, setShowTransliteration],
+                      ].map(([label, on, setOn]) => (
+                        <button
+                          key={label}
+                          onClick={() => setOn((v) => !v)}
+                          aria-pressed={on}
+                          className={`flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-medium border transition ${
+                            on ? `${t.divider} ${t.text}` : `${t.divider} ${t.textFaint} line-through`
+                          } ${t.hoverSoft}`}
+                        >
+                          {on ? <Eye size={12} /> : <EyeOff size={12} />}
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={`flex items-center justify-center gap-1.5 ${showTranslation ? '' : 'hidden'}`}>
                       {Object.entries(TRANSLATION_OPTIONS).map(([code, opt]) => (
                         <button
                           key={code}
@@ -2652,21 +2696,25 @@ export default function QuranApp() {
                           {ayah.arabic}
                         </p>
 
-                        <p
-                          className={`italic ${t.textMuted} mb-2 leading-relaxed ${
-                            beginnerMode ? 'text-base' : 'text-sm'
-                          }`}
-                        >
-                          {ayah.transliteration}
-                        </p>
-                        <p
-                          dir={TRANSLATION_OPTIONS[translationLang].dir}
-                          className={`${TRANSLATION_OPTIONS[translationLang].fontClass} leading-relaxed ${t.text} ${
-                            beginnerMode ? 'text-lg' : 'text-base'
-                          }`}
-                        >
-                          {ayah.translation}
-                        </p>
+                        {showTransliteration && (
+                          <p
+                            className={`italic ${t.textMuted} mb-2 leading-relaxed ${
+                              beginnerMode ? 'text-base' : 'text-sm'
+                            }`}
+                          >
+                            {ayah.transliteration}
+                          </p>
+                        )}
+                        {showTranslation && (
+                          <p
+                            dir={TRANSLATION_OPTIONS[translationLang].dir}
+                            className={`${TRANSLATION_OPTIONS[translationLang].fontClass} leading-relaxed ${t.text} ${
+                              beginnerMode ? 'text-lg' : 'text-base'
+                            }`}
+                          >
+                            {ayah.translation}
+                          </p>
+                        )}
 
                         {note && !isEditingNote && (
                           <div className={`mt-4 pt-4 border-t ${t.divider}`}>
