@@ -8,7 +8,7 @@ import {
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
   Home, Shield, Users, Utensils, Star, MoreHorizontal,
   VolumeX, RotateCcw, ChevronUp, Repeat, Infinity as InfinityIcon,
-  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise, Eye, EyeOff,
+  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise, Eye, EyeOff, CircleDot,
 } from 'lucide-react';
 
 /**
@@ -986,8 +986,9 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'hijri' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'tasbih' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [mobileMore, setMobileMore] = useState(false);
 
   // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
   const [prayerLocation, setPrayerLocation] = useState(() => loadJSON(LS_PRAYER_LOCATION, null)); // {lat, lon, label}
@@ -2095,6 +2096,16 @@ export default function QuranApp() {
               <Sparkles size={14} />
               <span className="hidden sm:inline">Duas</span>
             </button>
+            <button
+              onClick={() => setSection('tasbih')}
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                section === 'tasbih' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+              }`}
+              title="Tasbih counter"
+            >
+              <CircleDot size={14} />
+              <span className="hidden sm:inline">Tasbih</span>
+            </button>
 
             <div className="relative">
               <button
@@ -2985,6 +2996,8 @@ export default function QuranApp() {
         />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
+      ) : section === 'tasbih' ? (
+        <TasbihSection t={t} />
       ) : section === 'hijri' ? (
         <HijriCalendarSection t={t} isDark={isDark} />
       ) : section === 'progress' ? (
@@ -3060,19 +3073,20 @@ export default function QuranApp() {
               section === 'quran' && ayahs.length > 0 ? '0px' : 'max(0.75rem, env(safe-area-inset-bottom))',
           }}
         >
-          <div className={`pointer-events-auto max-w-md mx-auto flex items-center justify-around rounded-full p-1.5 ${t.glassPanel}`}>
+          <div className={`pointer-events-auto relative max-w-md mx-auto flex items-center justify-around rounded-full p-1.5 ${t.glassPanel}`}>
             {[
               { key: 'quran', label: "Qur'an", icon: BookOpen },
               { key: 'prayer', label: 'Prayer', icon: Clock },
+              { key: 'tasbih', label: 'Tasbih', icon: CircleDot },
               { key: 'duas', label: 'Duas', icon: Sparkles },
-              { key: 'hijri', label: 'Hijri', icon: CalendarDays },
-              { key: 'progress', label: 'Progress', icon: Target },
-              { key: 'learn', label: 'Learn', icon: GraduationCap },
             ].map(({ key, label, icon: Icon }) => (
               <button
                 key={key}
-                onClick={() => setSection(key)}
-                className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-full transition ${
+                onClick={() => {
+                  setSection(key);
+                  setMobileMore(false);
+                }}
+                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-full transition ${
                   section === key ? `${t.accentBg} text-white` : t.textMuted
                 }`}
                 aria-label={label}
@@ -3081,6 +3095,40 @@ export default function QuranApp() {
                 <span className="text-[10px] font-medium">{label}</span>
               </button>
             ))}
+            <button
+              onClick={() => setMobileMore((v) => !v)}
+              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-full transition ${
+                ['hijri', 'progress', 'learn'].includes(section) ? `${t.accentBg} text-white` : t.textMuted
+              }`}
+              aria-label="More sections"
+              aria-expanded={mobileMore}
+            >
+              <MoreHorizontal size={18} />
+              <span className="text-[10px] font-medium">More</span>
+            </button>
+            {mobileMore && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMobileMore(false)} />
+                <div className={`absolute bottom-full right-0 mb-2 w-44 rounded-xl border shadow-lg z-50 overflow-hidden ${t.cardBg} ${t.headerBg}`}>
+                  {[
+                    { key: 'hijri', label: 'Hijri Calendar', icon: CalendarDays },
+                    { key: 'progress', label: 'Progress', icon: Target },
+                    { key: 'learn', label: 'Learn', icon: GraduationCap },
+                  ].map(({ key, label, icon: Icon }) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setSection(key);
+                        setMobileMore(false);
+                      }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left ${t.hoverSoft} ${section === key ? t.accent : ''}`}
+                    >
+                      <Icon size={15} /> {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -4505,6 +4553,246 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ==================== Tasbih (dhikr counter) ==================== */
+
+const LS_TASBIH = 'quran_reader_tasbih_v1';
+
+// Local calendar date as YYYY-MM-DD (never UTC, so "today" is right at night).
+function dateKey(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function usePersisted(key, initial) {
+  const [value, setValue] = useState(() => loadJSON(key, initial));
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // storage full or blocked — keep working in memory
+    }
+  }, [key, value]);
+  return [value, setValue];
+}
+
+function buzz(pattern) {
+  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(pattern);
+}
+
+/* ---------------- Tasbih ---------------- */
+
+const TASBIH_PRESETS = [
+  { id: 'subhanallah', arabic: 'سُبْحَانَ اللَّهِ', translit: 'SubhanAllah', meaning: 'Glory be to Allah', target: 33 },
+  { id: 'alhamdulillah', arabic: 'الْحَمْدُ لِلَّهِ', translit: 'Alhamdulillah', meaning: 'All praise is for Allah', target: 33 },
+  { id: 'allahu-akbar', arabic: 'اللَّهُ أَكْبَرُ', translit: 'Allahu Akbar', meaning: 'Allah is the Greatest', target: 34 },
+  { id: 'la-ilaha', arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ', translit: 'La ilaha illallah', meaning: 'There is no god but Allah', target: 100 },
+  { id: 'astaghfirullah', arabic: 'أَسْتَغْفِرُ اللَّهَ', translit: 'Astaghfirullah', meaning: 'I seek forgiveness from Allah', target: 100 },
+  { id: 'salawat', arabic: 'اللَّهُمَّ صَلِّ عَلَىٰ مُحَمَّدٍ', translit: 'Allahumma salli ala Muhammad', meaning: 'O Allah, send blessings upon Muhammad ﷺ', target: 100 },
+  { id: 'hawqala', arabic: 'لَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ', translit: 'La hawla wa la quwwata illa billah', meaning: 'There is no might or power except with Allah', target: 100 },
+];
+const TASBIH_GUIDED = [
+  { id: 'subhanallah', target: 33 },
+  { id: 'alhamdulillah', target: 33 },
+  { id: 'allahu-akbar', target: 34 },
+];
+const TASBIH_DEFAULT = { preset: 'subhanallah', count: 0, target: 33, vibrate: true, guided: false, step: 0, totals: {}, allTime: {} };
+
+function TasbihPanel({ t }) {
+  const [saved, setSaved] = usePersisted(LS_TASBIH, TASBIH_DEFAULT);
+  const st = { ...TASBIH_DEFAULT, ...saved };
+  const [flash, setFlash] = useState(false);
+  const preset = TASBIH_PRESETS.find((p) => p.id === st.preset) || TASBIH_PRESETS[0];
+  const today = dateKey();
+  const todayTotal = Object.values(st.totals[today] || {}).reduce((a, b) => a + b, 0);
+  const finished = st.guided && st.step >= 3;
+  const R = 88;
+  const C = 2 * Math.PI * R;
+  const progress = st.target > 0 ? Math.min(1, st.count / st.target) : 0;
+
+  const vib = (p) => {
+    if (st.vibrate) buzz(p);
+  };
+
+  const tap = () => {
+    if (finished) return;
+    const totals = { ...st.totals, [today]: { ...(st.totals[today] || {}), [st.preset]: (st.totals[today]?.[st.preset] || 0) + 1 } };
+    const keep = Object.keys(totals).sort().slice(-60); // keep two months of history
+    const prunedTotals = {};
+    keep.forEach((k) => {
+      prunedTotals[k] = totals[k];
+    });
+    const allTime = { ...st.allTime, [st.preset]: (st.allTime[st.preset] || 0) + 1 };
+    let next = { ...st, count: st.count + 1, totals: prunedTotals, allTime };
+    if (st.target > 0 && next.count >= st.target) {
+      vib([80, 60, 80]);
+      setFlash(true);
+      setTimeout(() => setFlash(false), 900);
+      if (st.guided && st.step < 2) {
+        const g = TASBIH_GUIDED[st.step + 1];
+        next = { ...next, preset: g.id, target: g.target, count: 0, step: st.step + 1 };
+      } else if (st.guided) {
+        next = { ...next, count: 0, step: 3 };
+      } else {
+        next = { ...next, count: 0 };
+      }
+    } else {
+      vib(12);
+    }
+    setSaved(next);
+  };
+
+  const choosePreset = (p) =>
+    setSaved({ ...st, preset: p.id, target: p.target, count: 0, guided: false, step: 0 });
+  const setTarget = (n) => setSaved({ ...st, target: n, count: 0 });
+  const startGuided = () => setSaved({ ...st, guided: true, step: 0, preset: 'subhanallah', target: 33, count: 0 });
+  const stopGuided = () => setSaved({ ...st, guided: false, step: 0, count: 0 });
+  // Undo also takes the tap back out of today's and the all-time totals, so the stats stay honest.
+  const undo = () => {
+    if (st.count <= 0) return;
+    const dayTotals = { ...(st.totals[today] || {}) };
+    if (dayTotals[st.preset] > 0) dayTotals[st.preset] -= 1;
+    const allTime = { ...st.allTime, [st.preset]: Math.max(0, (st.allTime[st.preset] || 0) - 1) };
+    setSaved({ ...st, count: st.count - 1, totals: { ...st.totals, [today]: dayTotals }, allTime });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+        {TASBIH_PRESETS.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => choosePreset(p)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+              st.preset === p.id && !st.guided ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+            }`}
+          >
+            {p.translit}
+          </button>
+        ))}
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-6 flex flex-col items-center ${t.cardBg}`}>
+        {st.guided && (
+          <div className={`text-xs mb-3 ${t.textMuted}`}>
+            After-prayer tasbih · {finished ? 'complete' : `step ${st.step + 1} of 3`}
+          </div>
+        )}
+        <div className="font-arabic text-3xl mb-1" dir="rtl">
+          {preset.arabic}
+        </div>
+        <div className={`text-xs mb-5 ${t.textMuted}`}>{preset.meaning}</div>
+
+        <button
+          onClick={tap}
+          disabled={finished}
+          className="relative w-56 h-56 rounded-full select-none active:scale-[0.98] transition-transform touch-manipulation"
+          aria-label={`Count ${preset.translit}`}
+        >
+          <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full -rotate-90">
+            <circle cx="100" cy="100" r={R} fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="8" />
+            <circle
+              cx="100" cy="100" r={R} fill="none" stroke="#66806B" strokeWidth="8" strokeLinecap="round"
+              strokeDasharray={C} strokeDashoffset={C * (1 - progress)}
+              style={{ transition: 'stroke-dashoffset 0.15s ease-out' }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            {finished ? (
+              <span className="text-lg font-semibold text-emerald-500">✓ Complete</span>
+            ) : (
+              <>
+                <span className="text-6xl font-semibold tabular-nums">{st.count}</span>
+                <span className={`text-sm mt-1 ${t.textMuted}`}>{st.target > 0 ? `of ${st.target}` : 'no limit'}</span>
+              </>
+            )}
+          </div>
+        </button>
+        <div className={`h-5 mt-3 text-sm text-emerald-500 transition-opacity ${flash ? 'opacity-100' : 'opacity-0'}`}>
+          {flash ? 'Round complete — keep going' : ''}
+        </div>
+
+        {finished && (
+          <button onClick={startGuided} className={`mt-2 text-xs px-4 py-2 rounded-lg ${t.accentBg} text-white`}>
+            Start again
+          </button>
+        )}
+
+        <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+          <button onClick={undo} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+            Undo
+          </button>
+          <button
+            onClick={() => setSaved({ ...st, count: 0 })}
+            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => setSaved({ ...st, vibrate: !st.vibrate })}
+            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${st.vibrate ? t.accent : t.textFaint}`}
+          >
+            Vibration {st.vibrate ? 'on' : 'off'}
+          </button>
+        </div>
+
+        {!st.guided && (
+          <div className="flex items-center justify-center gap-1.5 mt-4">
+            <span className={`text-xs ${t.textMuted} mr-1`}>Target</span>
+            {[33, 99, 100, 0].map((n) => (
+              <button
+                key={n}
+                onClick={() => setTarget(n)}
+                className={`px-2.5 py-1 rounded-full text-[11px] border ${
+                  st.target === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                }`}
+              >
+                {n === 0 ? '∞' : n}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">After-prayer tasbih</h3>
+            <p className={`text-xs mt-1 leading-relaxed ${t.textMuted}`}>
+              SubhanAllah ×33, Alhamdulillah ×33, Allahu Akbar ×34. The counter moves to the next one by itself
+              (Sahih Muslim).
+            </p>
+          </div>
+          <button
+            onClick={st.guided ? stopGuided : startGuided}
+            className={`shrink-0 text-xs px-3 py-1.5 rounded-lg ${st.guided ? `border ${t.divider} ${t.hoverSoft}` : `${t.accentBg} text-white`}`}
+          >
+            {st.guided ? 'Stop' : 'Start'}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
+          <div className={`text-2xl font-semibold ${t.accent}`}>{todayTotal.toLocaleString()}</div>
+          <div className={`text-xs mt-1 ${t.textMuted}`}>Dhikr today</div>
+        </div>
+        <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
+          <div className="text-2xl font-semibold">{(st.allTime[st.preset] || 0).toLocaleString()}</div>
+          <div className={`text-xs mt-1 ${t.textMuted}`}>All-time · {preset.translit}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TasbihSection({ t }) {
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-28">
+      <TasbihPanel t={t} />
     </div>
   );
 }
