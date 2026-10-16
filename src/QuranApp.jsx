@@ -237,7 +237,7 @@ const DUAS = [
     occasion: "Said on the way home, added to the travel dua",
     arabic: 'آيِبُونَ تَائِبُونَ عَابِدُونَ لِرَبِّنَا حَامِدُونَ',
     translit: "Ayibuna ta'ibuna 'abiduna li-Rabbina hamidun",
-    translation: 'We return, repentant, worshipping, and praising our Lord.',
+    translation: 'We return, repentant, Ibadahping, and praising our Lord.',
   },
   {
     id: 'protection-distress',
@@ -795,7 +795,7 @@ const SALAH_STEPS = [
     translit:
       "Wajjahtu wajhiya lilladhi fataras-samawati wal-arda hanifan wa ma ana minal-mushrikin. Inna salati wa nusuki wa mahyaya wa mamati lillahi Rabbil-'alamin, la sharika lahu wa bidhalika umirtu wa ana minal-muslimin",
     translation:
-      "I have turned my face toward He who created the heavens and the earth, inclining toward truth, and I am not of those who associate partners with Him. Indeed, my prayer, my rites of worship, my living and my dying are for Allah, Lord of the worlds. He has no partner; this I have been commanded, and I am of those who submit to Him",
+      "I have turned my face toward He who created the heavens and the earth, inclining toward truth, and I am not of those who associate partners with Him. Indeed, my prayer, my rites of Ibadah, my living and my dying are for Allah, Lord of the worlds. He has no partner; this I have been commanded, and I am of those who submit to Him",
     note: "Recited silently, just after the opening Takbir, before Al-Fatiha (drawn from Qur'an 6:79 and 6:162–163). A shorter alternative, \"Subhanaka Allahumma wa bihamdika, wa tabarakasmuka, wa ta'ala jadduka, wa la ilaha ghairuk\" (\"Glory is to You, O Allah, and praise; blessed is Your name, exalted is Your majesty, and there is no god besides You\"), is also widely used — which one is customary varies by region and school of thought.",
   },
   {
@@ -986,7 +986,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'worship' | 'hijri' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'Ibadah' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
@@ -995,7 +995,7 @@ export default function QuranApp() {
   const [azanPlaying, setAzanPlaying] = useState(false);
   const [adhanReady, setAdhanReady] = useState(false); // true once the Azan file has loaded
   const [extraRem, setExtraRem] = useState(() => ({ ...DEFAULT_EXTRA_REM, ...loadJSON(LS_EXTRA_REM, {}) }));
-  const [worshipTab, setWorshipTab] = useState('tasbih');
+  const [IbadahTab, setIbadahTab] = useState('tasbih');
   const [mobileMore, setMobileMore] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installed, setInstalled] = useState(
@@ -2201,14 +2201,14 @@ export default function QuranApp() {
               <span className="hidden sm:inline">Duas</span>
             </button>
             <button
-              onClick={() => setSection('worship')}
+              onClick={() => setSection('Ibadah')}
               className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                section === 'worship' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                section === 'Ibadah' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
-              title="Worship: tasbih, adhkar, prayer tracker, Ramadan"
+              title="Ibadah: tasbih, adhkar, prayer tracker, Ramadan"
             >
               <Heart size={14} />
-              <span className="hidden sm:inline">Worship</span>
+              <span className="hidden sm:inline">Ibadah</span>
             </button>
 
             <div className="relative">
@@ -3103,11 +3103,11 @@ export default function QuranApp() {
         />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
-      ) : section === 'worship' ? (
-        <WorshipSection
+      ) : section === 'Ibadah' ? (
+        <IbadahSection
           t={t}
-          tab={worshipTab}
-          setTab={setWorshipTab}
+          tab={IbadahTab}
+          setTab={setIbadahTab}
           location={prayerLocation}
           extraRem={extraRem}
           setExtra={setExtra}
@@ -3124,9 +3124,9 @@ export default function QuranApp() {
           khatmahStats={khatmahStats}
           translationLang={translationLang}
           onOpenAyah={(surahNum, ayahNum) => selectSurah(surahNum, ayahNum)}
-          openWorship={(tab) => {
-            setWorshipTab(tab);
-            setSection('worship');
+          openIbadah={(tab) => {
+            setIbadahTab(tab);
+            setSection('Ibadah');
           }}
         />
       ) : (
@@ -3196,7 +3196,7 @@ export default function QuranApp() {
             {[
               { key: 'quran', label: "Qur'an", icon: BookOpen },
               { key: 'prayer', label: 'Prayer', icon: Clock },
-              { key: 'worship', label: 'Worship', icon: Heart },
+              { key: 'Ibadah', label: 'Ibadah', icon: Heart },
               { key: 'duas', label: 'Duas', icon: Sparkles },
             ].map(({ key, label, icon: Icon }) => (
               <button
@@ -3972,10 +3972,10 @@ const KHATMAH_PRESETS = [
   { label: '1 year', days: 365 },
 ];
 
-function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah, openWorship }) {
+function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah, openIbadah }) {
   const [customDate, setCustomDate] = useState('');
-  // Worship summary, read from what the Worship tab saved on this device.
-  const worship = useMemo(() => {
+  // Ibadah summary, read from what the Ibadah tab saved on this device.
+  const Ibadah = useMemo(() => {
     const today = dateKey();
     const pl = { log: {}, extra: {}, madeUp: {}, ...loadJSON(LS_PRAYER_LOG, {}) };
     const ad = loadJSON(LS_ADHKAR, {});
@@ -4059,37 +4059,37 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
         </div>
       </div>
 
-      {/* Prayer & worship summary */}
+      {/* Prayer & Ibadah summary */}
       <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Prayer & worship</h2>
-          <button onClick={() => openWorship('prayers')} className={`text-xs ${t.accent} hover:underline`}>
+          <h2 className="text-sm font-semibold">Prayer & Ibadah</h2>
+          <button onClick={() => openIbadah('prayers')} className={`text-xs ${t.accent} hover:underline`}>
             Open tracker
           </button>
         </div>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <div className="text-xl font-semibold">{worship.prayedToday}/5</div>
+            <div className="text-xl font-semibold">{Ibadah.prayedToday}/5</div>
             <div className={`text-[11px] ${t.textMuted}`}>Prayed today</div>
           </div>
           <div>
-            <div className={`text-xl font-semibold ${t.accent}`}>{worship.streak}</div>
-            <div className={`text-[11px] ${t.textMuted}`}>Prayer streak (best {worship.best})</div>
+            <div className={`text-xl font-semibold ${t.accent}`}>{Ibadah.streak}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Prayer streak (best {Ibadah.best})</div>
           </div>
           <div>
-            <div className={`text-xl font-semibold ${worship.qada ? 'text-amber-500' : ''}`}>{worship.qada}</div>
+            <div className={`text-xl font-semibold ${Ibadah.qada ? 'text-amber-500' : ''}`}>{Ibadah.qada}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Qada owed</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{worship.morning}</div>
+            <div className="text-xl font-semibold">{Ibadah.morning}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Morning adhkar streak</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{worship.evening}</div>
+            <div className="text-xl font-semibold">{Ibadah.evening}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Evening adhkar streak</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{worship.dhikr.toLocaleString()}</div>
+            <div className="text-xl font-semibold">{Ibadah.dhikr.toLocaleString()}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Dhikr today</div>
           </div>
         </div>
@@ -4783,7 +4783,7 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
   );
 }
 
-/* ==================== Worship helpers (pure logic) ==================== */
+/* ==================== Ibadah helpers (pure logic) ==================== */
 
 const FIVE_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
@@ -4912,7 +4912,7 @@ function fmtCountdown(sec) {
   return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
 }
 
-/* ==================== Worship hub: Tasbih, Adhkar, Prayer tracker, Ramadan, Offline ==================== */
+/* ==================== Ibadah hub: Tasbih, Adhkar, Prayer tracker, Ramadan, Offline ==================== */
 
 const LS_TASBIH = 'quran_reader_tasbih_v1';
 const LS_ADHKAR = 'quran_reader_adhkar_v1';
@@ -5018,6 +5018,52 @@ function buzz(pattern) {
   }
 }
 
+function isIOSDevice() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+// iPhone/iPad have no Vibration API, but Safari 17.4+ plays a light haptic tick when a hidden
+// "switch" checkbox is toggled by a tap. This is an unofficial trick that Apple does not document,
+// so treat it as best effort. All iOS browsers use Apple's engine, so Chrome on iOS behaves the same.
+let hapticLabel = null;
+function iosHaptic() {
+  try {
+    if (!hapticLabel) {
+      const label = document.createElement('label');
+      label.setAttribute('aria-hidden', 'true');
+      label.style.display = 'none';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.setAttribute('switch', '');
+      input.tabIndex = -1;
+      label.appendChild(input);
+      document.head.appendChild(label);
+      hapticLabel = label;
+    }
+    hapticLabel.click(); // must run inside a tap handler
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// True when we can try some kind of haptic on this device.
+function hapticAvailable() {
+  return vibrationSupported() || isIOSDevice();
+}
+
+// One entry point for tap feedback: real vibration where supported, the iOS trick otherwise.
+function hapticFeedback(kind) {
+  if (vibrationSupported()) return buzz(kind === 'round' ? [150, 80, 150] : 35);
+  if (isIOSDevice()) {
+    const ok = iosHaptic();
+    if (kind === 'round') setTimeout(iosHaptic, 110); // second tick; may be ignored by iOS outside a tap
+    return ok;
+  }
+  return false;
+}
+
 // A very short, quiet tick for devices that cannot vibrate (or when the phone is on silent-vibrate).
 let tickCtx = null;
 function playTick(double = false) {
@@ -5070,6 +5116,10 @@ function TasbihPanel({ t }) {
   const st = { ...TASBIH_DEFAULT, ...saved };
   const [flash, setFlash] = useState(false);
   const [vibMsg, setVibMsg] = useState('');
+  const PRESET_TARGETS = [33, 99, 100];
+  const isCustom = !st.guided && st.target > 0 && !PRESET_TARGETS.includes(st.target);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customVal, setCustomVal] = useState(() => (st.target > 0 && !PRESET_TARGETS.includes(st.target) ? String(st.target) : ''));
   const preset = TASBIH_PRESETS.find((p) => p.id === st.preset) || TASBIH_PRESETS[0];
   const today = dateKey();
   const todayTotal = Object.values(st.totals[today] || {}).reduce((a, b) => a + b, 0);
@@ -5080,17 +5130,20 @@ function TasbihPanel({ t }) {
 
   // Feedback on every tap: vibration and/or a soft tick; the end of a round gets a stronger cue.
   const feedback = (kind) => {
-    if (st.vibrate) buzz(kind === 'round' ? [150, 80, 150] : 35);
+    if (st.vibrate) hapticFeedback(kind);
     if (st.sound) playTick(kind === 'round');
   };
 
   const testVibration = () => {
-    if (!vibrationSupported()) {
-      setVibMsg("This browser or device doesn't support vibration (iPhone, iPad and most laptops don't). Turn on Sound for tap feedback.");
-      return;
+    if (vibrationSupported()) {
+      buzz([200, 100, 200]);
+      setVibMsg("A vibration was sent. If you felt nothing, check your phone's vibration / touch-feedback settings and that battery saver is off.");
+    } else if (isIOSDevice()) {
+      iosHaptic();
+      setVibMsg("Tried Apple's light haptic tap. You should feel a small tick on iOS 17.4 or newer. If not, check Settings > Sounds & Haptics > System Haptics, turn off Low Power Mode, or use Sound instead.");
+    } else {
+      setVibMsg("This device has no vibration (most laptops and desktops don't). Turn on Sound for tap feedback.");
     }
-    buzz([200, 100, 200]);
-    setVibMsg("A vibration was sent. If you felt nothing, check your phone's vibration / touch-feedback settings and that battery saver is off.");
   };
 
   const tap = () => {
@@ -5124,6 +5177,13 @@ function TasbihPanel({ t }) {
   const choosePreset = (p) =>
     setSaved({ ...st, preset: p.id, target: p.target, count: 0, guided: false, step: 0 });
   const setTarget = (n) => setSaved({ ...st, target: n, count: 0 });
+  const applyCustom = () => {
+    const n = parseInt(customVal, 10);
+    if (!n || n < 1) return;
+    const clamped = Math.min(n, 100000);
+    setCustomVal(String(clamped));
+    setTarget(clamped);
+  };
   const startGuided = () => setSaved({ ...st, guided: true, step: 0, preset: 'subhanallah', target: 33, count: 0 });
   const stopGuided = () => setSaved({ ...st, guided: false, step: 0, count: 0 });
   // Undo also takes the tap back out of today's and the all-time totals, so the stats stay honest.
@@ -5229,24 +5289,61 @@ function TasbihPanel({ t }) {
         </div>
         {(vibMsg || !vibrationSupported()) && (
           <p className={`text-[11px] text-center max-w-xs mt-2 leading-snug ${t.textMuted}`}>
-            {vibMsg || "This device doesn't support vibration (iPhone, iPad and most laptops don't). Turn on Sound for tap feedback."}
+            {vibMsg ||
+              (isIOSDevice()
+                ? "iPhone/iPad: using Apple's light haptic tap (works on iOS 17.4 or newer, not guaranteed). Turn on Sound if you feel nothing."
+                : 'This device has no vibration (most laptops and desktops). Turn on Sound for tap feedback.')}
           </p>
         )}
 
         {!st.guided && (
-          <div className="flex items-center justify-center gap-1.5 mt-4">
-            <span className={`text-xs ${t.textMuted} mr-1`}>Target</span>
-            {[33, 99, 100, 0].map((n) => (
+          <div className="mt-4 flex flex-col items-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              <span className={`text-xs ${t.textMuted} mr-1`}>Target</span>
+              {[33, 99, 100, 0].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => {
+                    setCustomOpen(false);
+                    setTarget(n);
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-[11px] border ${
+                    st.target === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                  }`}
+                >
+                  {n === 0 ? '∞' : n}
+                </button>
+              ))}
               <button
-                key={n}
-                onClick={() => setTarget(n)}
+                onClick={() => setCustomOpen(true)}
                 className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                  st.target === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                  isCustom || customOpen ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
                 }`}
               >
-                {n === 0 ? '∞' : n}
+                Custom{isCustom ? ` (${st.target})` : ''}
               </button>
-            ))}
+            </div>
+            {(customOpen || isCustom) && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max="100000"
+                  value={customVal}
+                  onChange={(e) => setCustomVal(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') applyCustom();
+                  }}
+                  placeholder="e.g. 7"
+                  aria-label="Custom count"
+                  className={`w-24 text-center text-sm px-3 py-1.5 rounded-lg border outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+                />
+                <button onClick={applyCustom} className={`text-xs px-3 py-1.5 rounded-lg ${t.accentBg} text-white`}>
+                  Set
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -5293,11 +5390,11 @@ const ADHKAR = [
   { id: 'asbahna', sessions: ['morning'], count: 1, source: 'Sahih Muslim.',
     arabic: 'أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذَا الْيَوْمِ وَخَيْرَ مَا بَعْدَهُ، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذَا الْيَوْمِ وَشَرِّ مَا بَعْدَهُ، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
     translit: "Asbahna wa asbahal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhal-yawmi wa khayra ma ba'dah, wa a'udhu bika min sharri ma fi hadhal-yawmi wa sharri ma ba'dah. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
-    translation: 'We have reached the morning and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this day and the good of what follows it, and I seek refuge in You from the evil of this day and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+    translation: 'We have reached the morning and the dominion belongs to Allah, and all praise is for Allah. None has the right to be Ibadahped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this day and the good of what follows it, and I seek refuge in You from the evil of this day and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
   { id: 'amsayna', sessions: ['evening'], count: 1, source: 'Sahih Muslim.',
     arabic: 'أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذِهِ اللَّيْلَةِ وَخَيْرَ مَا بَعْدَهَا، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذِهِ اللَّيْلَةِ وَشَرِّ مَا بَعْدَهَا، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
     translit: "Amsayna wa amsal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhihil-laylah wa khayra ma ba'daha, wa a'udhu bika min sharri ma fi hadhihil-laylah wa sharri ma ba'daha. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
-    translation: 'We have reached the evening and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this night and the good of what follows it, and I seek refuge in You from the evil of this night and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+    translation: 'We have reached the evening and the dominion belongs to Allah, and all praise is for Allah. None has the right to be Ibadahped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this night and the good of what follows it, and I seek refuge in You from the evil of this night and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
   { id: 'bika-asbahna', sessions: ['morning'], count: 1, source: 'at-Tirmidhi.',
     arabic: 'اللَّهُمَّ بِكَ أَصْبَحْنَا، وَبِكَ أَمْسَيْنَا، وَبِكَ نَحْيَا، وَبِكَ نَمُوتُ، وَإِلَيْكَ النُّشُورُ',
     translit: "Allahumma bika asbahna, wa bika amsayna, wa bika nahya, wa bika namutu, wa ilaykan-nushur",
@@ -5319,7 +5416,7 @@ const ADHKAR = [
   { id: 'tahlil-10', sessions: ['morning', 'evening'], count: 10, source: 'Reported by Abu Dawud and an-Nasa\'i for ten times; saying it 100 times in a day is reported in Bukhari and Muslim.',
     arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ',
     translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir",
-    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and His is the praise, and He is able to do all things.' },
+    translation: 'None has the right to be Ibadahped but Allah alone, with no partner. His is the dominion and His is the praise, and He is able to do all things.' },
   { id: 'subhanallah-bihamdihi', sessions: ['morning', 'evening'], count: 100, source: 'Sahih Muslim: whoever says it 100 times morning and evening.',
     arabic: 'سُبْحَانَ اللَّهِ وَبِحَمْدِهِ',
     translit: 'Subhanallahi wa bihamdih',
@@ -5347,11 +5444,11 @@ const ADHKAR = [
   { id: 'la-mani', sessions: ['after'], count: 1, source: 'Sahih al-Bukhari and Sahih Muslim.',
     arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، اللَّهُمَّ لَا مَانِعَ لِمَا أَعْطَيْتَ، وَلَا مُعْطِيَ لِمَا مَنَعْتَ، وَلَا يَنْفَعُ ذَا الْجَدِّ مِنْكَ الْجَدُّ',
     translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir. Allahumma la mani'a lima a'tayta, wa la mu'tiya lima mana'ta, wa la yanfa'u dhal-jaddi minkal-jadd",
-    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and the praise, and He is able to do all things. O Allah, none can withhold what You give, none can give what You withhold, and the might of the mighty cannot benefit them against You.' },
+    translation: 'None has the right to be Ibadahped but Allah alone, with no partner. His is the dominion and the praise, and He is able to do all things. O Allah, none can withhold what You give, none can give what You withhold, and the might of the mighty cannot benefit them against You.' },
   { id: 'a-inni', sessions: ['after'], count: 1, source: "Abu Dawud, an-Nasa'i: the Prophet ﷺ told Mu'adh to say it after every prayer.",
     arabic: 'اللَّهُمَّ أَعِنِّي عَلَىٰ ذِكْرِكَ وَشُكْرِكَ وَحُسْنِ عِبَادَتِكَ',
     translit: "Allahumma a'inni 'ala dhikrika wa shukrika wa husni 'ibadatik",
-    translation: 'O Allah, help me to remember You, to thank You, and to worship You well.' },
+    translation: 'O Allah, help me to remember You, to thank You, and to Ibadah You well.' },
 ];
 const ADHKAR_SESSIONS = [
   { key: 'morning', label: 'Morning', hint: 'After Fajr until sunrise is best; valid until Dhuhr' },
@@ -6248,9 +6345,9 @@ function OfflinePanel({ t, installPrompt, onInstall, installed, ayahs, surahMeta
   );
 }
 
-/* ---------------- Worship hub ---------------- */
+/* ---------------- Ibadah hub ---------------- */
 
-const WORSHIP_TABS = [
+const Ibadah_TABS = [
   { key: 'tasbih', label: 'Tasbih' },
   { key: 'adhkar', label: 'Adhkar' },
   { key: 'prayers', label: 'Prayers' },
@@ -6258,11 +6355,11 @@ const WORSHIP_TABS = [
   { key: 'app', label: 'App' },
 ];
 
-function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
+function IbadahSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
   return (
     <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16">
       <div className="flex gap-1.5 overflow-x-auto pb-3 mb-3 -mx-1 px-1">
-        {WORSHIP_TABS.map((x) => (
+        {Ibadah_TABS.map((x) => (
           <button
             key={x.key}
             onClick={() => setTab(x.key)}
@@ -6461,7 +6558,7 @@ function toArabicDigits(n) {
   return String(n).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
 }
 
-// kind: 'major' = holiday / key date, 'minor' = recommended-worship day
+// kind: 'major' = holiday / key date, 'minor' = recommended-Ibadah day
 function hijriEventsFor(m, d) {
   const ev = [];
   if (m === 1 && d === 1) ev.push({ label: 'Islamic New Year', kind: 'major' });
