@@ -8,7 +8,7 @@ import {
   Share2, StickyNote, Tag, Download, GraduationCap, Type,
   Home, Shield, Users, Utensils, Star, MoreHorizontal,
   VolumeX, RotateCcw, ChevronUp, Repeat, Infinity as InfinityIcon,
-  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise, Eye, EyeOff, CircleDot,
+  ChevronRight, CalendarDays, Heart, Briefcase, Sunrise, Eye, EyeOff,
 } from 'lucide-react';
 
 /**
@@ -986,15 +986,83 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'tasbih' | 'hijri' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'worship' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
-  const [mobileMore, setMobileMore] = useState(false);
 
   // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
   const [prayerLocation, setPrayerLocation] = useState(() => loadJSON(LS_PRAYER_LOCATION, null)); // {lat, lon, label}
   const [remindersOn, setRemindersOn] = useState(() => loadJSON(LS_REMINDERS, false));
   const [azanPlaying, setAzanPlaying] = useState(false);
   const [adhanReady, setAdhanReady] = useState(false); // true once the Azan file has loaded
+  const [extraRem, setExtraRem] = useState(() => ({ ...DEFAULT_EXTRA_REM, ...loadJSON(LS_EXTRA_REM, {}) }));
+  const [worshipTab, setWorshipTab] = useState('tasbih');
+  const [mobileMore, setMobileMore] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installed, setInstalled] = useState(
+    () => typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true)
+  );
+  useEffect(() => {
+    localStorage.setItem(LS_EXTRA_REM, JSON.stringify(extraRem));
+  }, [extraRem]);
+
+  // Turning an extra reminder on also asks for notification permission (from a tap, as browsers require).
+  const setExtra = async (key, val) => {
+    if (val && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission().catch(() => {});
+    }
+    setExtraRem((p) => ({ ...p, [key]: val }));
+  };
+
+  // PWA: make sure the manifest/icons are linked, register the service worker (built app only,
+  // so development never serves stale files), and catch the browser's install prompt.
+  useEffect(() => {
+    const head = document.head;
+    if (!head.querySelector('link[rel="manifest"]')) {
+      const l = document.createElement('link');
+      l.rel = 'manifest';
+      l.href = '/manifest.webmanifest';
+      head.appendChild(l);
+    }
+    if (!head.querySelector('meta[name="theme-color"]')) {
+      const m = document.createElement('meta');
+      m.name = 'theme-color';
+      m.content = '#66806B';
+      head.appendChild(m);
+    }
+    if (!head.querySelector('link[rel="apple-touch-icon"]')) {
+      const l = document.createElement('link');
+      l.rel = 'apple-touch-icon';
+      l.href = '/apple-touch-icon.png';
+      head.appendChild(l);
+    }
+    if ('serviceWorker' in navigator && import.meta.env.PROD) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+    const onPrompt = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    const onInstalled = () => {
+      setInstalled(true);
+      setInstallPrompt(null);
+    };
+    window.addEventListener('beforeinstallprompt', onPrompt);
+    window.addEventListener('appinstalled', onInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onPrompt);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
+  }, []);
+  const handleInstall = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    try {
+      await installPrompt.userChoice;
+    } catch {
+      // dismissed
+    }
+    setInstallPrompt(null);
+  };
   const adhanAudioRef = useRef(null);
 
   useEffect(() => {
@@ -1088,13 +1156,21 @@ export default function QuranApp() {
 
   // Clock check every 5 s instead of one long timeout per prayer: survives
   // background-tab throttling and sleep, and rolls over to the next day by itself.
+  // Extra reminders (Duha, Tahajjud, Friday Al-Kahf, suhoor, iftar, Sunnah-fast eve) read from
+  // refs so toggling one never restarts the loop.
+  const extraRemRef = useRef(extraRem);
+  extraRemRef.current = extraRem;
+  const remindersOnRef = useRef(remindersOn);
+  remindersOnRef.current = remindersOn;
+  const engineActive = remindersOn || Object.values(extraRem).some(Boolean);
+
   useEffect(() => {
-    if (!remindersOn || !prayerLocation) return;
+    if (!engineActive || !prayerLocation) return undefined;
     let cancelled = false;
     let cfg = null; // { tz, date, times }
     let fetching = false;
     let lastFetchAt = 0;
-    let fired = new Set(loadJSON(LS_REMINDERS_FIRED, []));
+    const fired = new Set(loadJSON(LS_REMINDERS_FIRED, []));
 
     const load = () => {
       fetching = true;
@@ -1105,7 +1181,7 @@ export default function QuranApp() {
         .then((data) => {
           if (cancelled) return;
           const times = {};
-          REMINDER_PRAYERS.forEach((k) => {
+          Object.keys(data.data.timings).forEach((k) => {
             times[k] = String(data.data.timings[k]).split(' ')[0];
           });
           const [dd, mm, yyyy] = String(data.data.date?.gregorian?.date || '').split('-');
@@ -1117,28 +1193,56 @@ export default function QuranApp() {
         });
     };
 
+    const fire = (id, title, body, withAzan) => {
+      if (fired.has(id)) return;
+      fired.add(id);
+      localStorage.setItem(LS_REMINDERS_FIRED, JSON.stringify([...fired].slice(-60)));
+      if (withAzan) playAdhanCue();
+      else playReminderChime();
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, { body, tag: id });
+        } catch {
+          // Notification constructor can throw in some contexts — ignore.
+        }
+      }
+    };
+
     const tick = () => {
       const { date, minutes } = zonedNow(cfg?.tz);
       if ((!cfg || cfg.date !== date) && !fetching && Date.now() - lastFetchAt > 60000) load();
       if (!cfg || cfg.date !== date) return;
-      REMINDER_PRAYERS.forEach((key) => {
-        const [h, m] = (cfg.times[key] || '').split(':').map(Number);
-        if (Number.isNaN(h) || Number.isNaN(m)) return;
-        const id = `${date}-${key}`;
-        const diff = minutes - (h * 60 + m);
-        if (diff >= 0 && diff <= REMINDER_GRACE_MIN && !fired.has(id)) {
-          fired.add(id);
-          localStorage.setItem(LS_REMINDERS_FIRED, JSON.stringify([...fired].slice(-12)));
-          playAdhanCue();
-          if ('Notification' in window && Notification.permission === 'granted') {
-            try {
-              new Notification(`${key} — time for prayer`, { body: 'It is time for Salah.', tag: id });
-            } catch {
-              // Notification constructor can throw in some contexts — ignore.
-            }
-          }
+      const due = (target) => target != null && minutes - target >= 0 && minutes - target <= REMINDER_GRACE_MIN;
+
+      if (remindersOnRef.current) {
+        REMINDER_PRAYERS.forEach((key) => {
+          if (due(timeToMin(cfg.times[key]))) fire(`${date}-${key}`, `${key} — time for prayer`, 'It is time for Salah.', true);
+        });
+      }
+
+      const ex = extraRemRef.current;
+      if (Object.values(ex).some(Boolean)) {
+        const x = computeExtraTimes(cfg.times);
+        const day = parseKey(date);
+        const adjust = getHijriAdjust();
+        const hj = HIJRI_FMT ? toHijri(day, adjust) : null;
+        if (ex.duha && due(timeToMin(x.duhaStart))) fire(`${date}-Duha`, 'Duha prayer time', 'The time for Salat ad-Duha has begun.');
+        if (ex.tahajjud && due(timeToMin(x.lastThirdThisMorning)))
+          fire(`${date}-Tahajjud`, 'Last third of the night', 'A blessed time for Tahajjud and dua.');
+        if (ex.kahf && day.getDay() === 5 && due(timeToMin(x.duhaStart)))
+          fire(`${date}-Kahf`, "Jumu'ah: Surah Al-Kahf", 'It is Friday. Read Surah Al-Kahf.');
+        if (hj && hj.m === 9) {
+          const fajr = timeToMin(cfg.times.Fajr);
+          const maghrib = timeToMin(cfg.times.Maghrib);
+          if (ex.suhoor && fajr != null && due(fajr - 45)) fire(`${date}-Suhoor`, 'Suhoor', 'Fajr is in 45 minutes. Eat suhoor and make your intention.');
+          if (ex.iftar && maghrib != null && due(maghrib - 10)) fire(`${date}-Iftar`, 'Iftar soon', 'Maghrib is in 10 minutes.');
         }
-      });
+        if (ex.sunnahFast && due(timeToMin(cfg.times.Isha))) {
+          const tomorrow = parseKey(addDaysKey(date, 1));
+          const info = sunnahFastInfo(tomorrow, HIJRI_FMT ? toHijri(tomorrow, adjust) : null);
+          if (info) fire(`${date}-FastEve`, 'Sunnah fast tomorrow', `${info.label}. Make your intention and eat suhoor.`);
+        }
+      }
     };
 
     tick();
@@ -1147,7 +1251,7 @@ export default function QuranApp() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [remindersOn, prayerLocation, playAdhanCue]);
+  }, [engineActive, prayerLocation, playAdhanCue]);
 
   // ---------------- Surah list ----------------
   const [surahList, setSurahList] = useState([]);
@@ -2097,14 +2201,14 @@ export default function QuranApp() {
               <span className="hidden sm:inline">Duas</span>
             </button>
             <button
-              onClick={() => setSection('tasbih')}
+              onClick={() => setSection('worship')}
               className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                section === 'tasbih' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+                section === 'worship' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
-              title="Tasbih counter"
+              title="Worship: tasbih, adhkar, prayer tracker, Ramadan"
             >
-              <CircleDot size={14} />
-              <span className="hidden sm:inline">Tasbih</span>
+              <Heart size={14} />
+              <span className="hidden sm:inline">Worship</span>
             </button>
 
             <div className="relative">
@@ -2993,11 +3097,22 @@ export default function QuranApp() {
           stopAzan={stopAzan}
           azanPlaying={azanPlaying}
           adhanReady={adhanReady}
+          extraRem={extraRem}
+          setExtra={setExtra}
+          openSurah={(n) => selectSurah(n)}
         />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
-      ) : section === 'tasbih' ? (
-        <TasbihSection t={t} />
+      ) : section === 'worship' ? (
+        <WorshipSection
+          t={t}
+          tab={worshipTab}
+          setTab={setWorshipTab}
+          location={prayerLocation}
+          extraRem={extraRem}
+          setExtra={setExtra}
+          offline={{ installPrompt, onInstall: handleInstall, installed, ayahs, surahMeta, reciter, translationLang }}
+        />
       ) : section === 'hijri' ? (
         <HijriCalendarSection t={t} isDark={isDark} />
       ) : section === 'progress' ? (
@@ -3009,6 +3124,10 @@ export default function QuranApp() {
           khatmahStats={khatmahStats}
           translationLang={translationLang}
           onOpenAyah={(surahNum, ayahNum) => selectSurah(surahNum, ayahNum)}
+          openWorship={(tab) => {
+            setWorshipTab(tab);
+            setSection('worship');
+          }}
         />
       ) : (
         <LearnSection t={t} beginnerMode={beginnerMode} setBeginnerMode={setBeginnerMode} />
@@ -3077,7 +3196,7 @@ export default function QuranApp() {
             {[
               { key: 'quran', label: "Qur'an", icon: BookOpen },
               { key: 'prayer', label: 'Prayer', icon: Clock },
-              { key: 'tasbih', label: 'Tasbih', icon: CircleDot },
+              { key: 'worship', label: 'Worship', icon: Heart },
               { key: 'duas', label: 'Duas', icon: Sparkles },
             ].map(({ key, label, icon: Icon }) => (
               <button
@@ -3165,7 +3284,7 @@ export default function QuranApp() {
 
 /* ==================== Prayer (Namaz) section ==================== */
 
-function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleReminders, playAdhanCue, stopAzan, azanPlaying, adhanReady }) {
+function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleReminders, playAdhanCue, stopAzan, azanPlaying, adhanReady, extraRem, setExtra, openSurah }) {
   const [tab, setTab] = useState('timings'); // 'timings' | 'qibla' | 'guide'
 
   const [locLoading, setLocLoading] = useState(false);
@@ -3176,6 +3295,8 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
   const [timings, setTimings] = useState(null);
   const [hijri, setHijri] = useState(null);
   const [methodInfo, setMethodInfo] = useState(null); // { name, tz }
+  const extraTimes = useMemo(() => computeExtraTimes(timings), [timings]);
+  const isFriday = parseKey(zonedNow(methodInfo?.tz).date).getDay() === 5;
   const [timingsLoading, setTimingsLoading] = useState(false);
   const [timingsError, setTimingsError] = useState(null);
 
@@ -3561,6 +3682,59 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                   ? `${adhanReady ? 'The Azan' : 'A chime'} will play, with a notification if allowed, at every prayer time — on any screen of the app. The app must stay open in a browser tab; it cannot ring when the browser is closed or the device is asleep.`
                   : `Plays ${adhanReady ? 'the Azan' : 'a chime'} and shows a notification at each prayer time while the app stays open in a browser tab.`}
               </p>
+              {isFriday && (
+                <div className={`rounded-2xl border px-4 py-3 mt-4 flex items-center justify-between gap-3 ${t.cardActive}`}>
+                  <div>
+                    <div className="text-sm font-semibold">Jumu'ah Mubarak</div>
+                    <div className={`text-xs ${t.textMuted}`}>It is recommended to read Surah Al-Kahf on Friday.</div>
+                  </div>
+                  <button onClick={() => openSurah(18)} className={`shrink-0 text-xs px-3 py-2 rounded-lg ${t.accentBg} text-white`}>
+                    Open Al-Kahf
+                  </button>
+                </div>
+              )}
+
+              <div className={`rounded-2xl border mt-4 px-4 py-4 ${t.cardBg}`}>
+                <h3 className="text-sm font-semibold mb-3">More times</h3>
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Duha (forenoon prayer)</span>
+                    <span className="tabular-nums font-medium">
+                      {extraTimes.duhaStart ? `${to12h(extraTimes.duhaStart)} – ${to12h(extraTimes.duhaEnd)}` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Last third of the night (Tahajjud)</span>
+                    <span className="tabular-nums font-medium">{extraTimes.lastThirdTonight ? to12h(extraTimes.lastThirdTonight) : '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span>Islamic midnight</span>
+                    <span className="tabular-nums font-medium">{extraTimes.midnight ? to12h(extraTimes.midnight) : '—'}</span>
+                  </div>
+                </div>
+                <p className={`text-[11px] mt-3 leading-relaxed ${t.textFaint}`}>
+                  Duha is approximate: from about 15 minutes after sunrise until about 10 minutes before Dhuhr. The last
+                  third of the night starts at the time shown tonight and lasts until Fajr.
+                </p>
+                <div className="mt-3 space-y-2">
+                  <SwitchRow t={t} label="Duha reminder" hint="When Duha time begins" on={extraRem.duha} onChange={(v) => setExtra('duha', v)} />
+                  <SwitchRow
+                    t={t}
+                    label="Tahajjud reminder"
+                    hint="At the start of the last third of the night"
+                    on={extraRem.tahajjud}
+                    onChange={(v) => setExtra('tahajjud', v)}
+                  />
+                  <SwitchRow
+                    t={t}
+                    label="Friday: Surah Al-Kahf reminder"
+                    hint="Friday morning, at Duha time"
+                    on={extraRem.kahf}
+                    onChange={(v) => setExtra('kahf', v)}
+                  />
+                </div>
+              </div>
+
               <p className={`text-xs ${t.textMuted} mt-3 text-center`}>
                 {methodInfo?.name
                   ? `Method: ${methodInfo.name}, chosen automatically for your location.`
@@ -3798,8 +3972,24 @@ const KHATMAH_PRESETS = [
   { label: '1 year', days: 365 },
 ];
 
-function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah }) {
+function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah, openWorship }) {
   const [customDate, setCustomDate] = useState('');
+  // Worship summary, read from what the Worship tab saved on this device.
+  const worship = useMemo(() => {
+    const today = dateKey();
+    const pl = { log: {}, extra: {}, madeUp: {}, ...loadJSON(LS_PRAYER_LOG, {}) };
+    const ad = loadJSON(LS_ADHKAR, {});
+    const ts = loadJSON(LS_TASBIH, {});
+    return {
+      prayedToday: dayCount(pl.log, today),
+      streak: currentPrayerStreak(pl.log, today),
+      best: bestPrayerStreak(pl.log),
+      qada: Object.values(pendingQada(pl.log, pl.extra, pl.madeUp)).reduce((a, b) => a + b, 0),
+      morning: streakFromKeys(ad.done?.morning || [], today),
+      evening: streakFromKeys(ad.done?.evening || [], today),
+      dhikr: Object.values(ts.totals?.[today] || {}).reduce((a, b) => a + b, 0),
+    };
+  }, []);
   const [dismissedWidgetNote, setDismissedWidgetNote] = useState(false);
 
   const [ayahOfDay, setAyahOfDay] = useState(null);
@@ -3866,6 +4056,42 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
         <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
           <div className="text-2xl font-semibold">{readingStats.percent.toFixed(1)}%</div>
           <div className={`text-xs ${t.textMuted} mt-1`}>of the Qur'an</div>
+        </div>
+      </div>
+
+      {/* Prayer & worship summary */}
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Prayer & worship</h2>
+          <button onClick={() => openWorship('prayers')} className={`text-xs ${t.accent} hover:underline`}>
+            Open tracker
+          </button>
+        </div>
+        <div className="grid grid-cols-3 gap-3 text-center">
+          <div>
+            <div className="text-xl font-semibold">{worship.prayedToday}/5</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Prayed today</div>
+          </div>
+          <div>
+            <div className={`text-xl font-semibold ${t.accent}`}>{worship.streak}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Prayer streak (best {worship.best})</div>
+          </div>
+          <div>
+            <div className={`text-xl font-semibold ${worship.qada ? 'text-amber-500' : ''}`}>{worship.qada}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Qada owed</div>
+          </div>
+          <div>
+            <div className="text-xl font-semibold">{worship.morning}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Morning adhkar streak</div>
+          </div>
+          <div>
+            <div className="text-xl font-semibold">{worship.evening}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Evening adhkar streak</div>
+          </div>
+          <div>
+            <div className="text-xl font-semibold">{worship.dhikr.toLocaleString()}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Dhikr today</div>
+          </div>
         </div>
       </div>
 
@@ -4557,14 +4783,150 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
   );
 }
 
-/* ==================== Tasbih (dhikr counter) ==================== */
+/* ==================== Worship helpers (pure logic) ==================== */
 
-const LS_TASBIH = 'quran_reader_tasbih_v1';
+const FIVE_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
 // Local calendar date as YYYY-MM-DD (never UTC, so "today" is right at night).
 function dateKey(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function parseKey(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d, 12);
+}
+function addDaysKey(key, n) {
+  const d = parseKey(key);
+  d.setDate(d.getDate() + n);
+  return dateKey(d);
+}
+function timeToMin(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return Number.isNaN(h) || Number.isNaN(m) ? null : h * 60 + m;
+}
+function minToTime(min) {
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+// Extra times derived from the timings we already fetch.
+//  Duha: from ~15 min after sunrise until ~10 min before Dhuhr (approximate).
+//  Last third: the night runs Maghrib -> Fajr; the last third starts at Fajr - night/3.
+//   `lastThirdThisMorning` is the one that ends at today's Fajr (used for reminders);
+//   `lastThirdTonight` is the API's value when present (shown to the user).
+function computeExtraTimes(times) {
+  if (!times) return {};
+  const sunrise = timeToMin(times.Sunrise);
+  const dhuhr = timeToMin(times.Dhuhr);
+  const fajr = timeToMin(times.Fajr);
+  const maghrib = timeToMin(times.Maghrib);
+  const out = {};
+  if (sunrise != null && dhuhr != null) {
+    out.duhaStart = minToTime(sunrise + 15);
+    out.duhaEnd = minToTime(dhuhr - 10);
+  }
+  if (fajr != null && maghrib != null) {
+    const night = fajr + 1440 - maghrib;
+    out.lastThirdThisMorning = minToTime(fajr - night / 3);
+    out.lastThirdComputed = minToTime(maghrib + (2 * night) / 3);
+  }
+  out.lastThirdTonight = times.Lastthird || out.lastThirdComputed || null;
+  out.midnight = times.Midnight || (fajr != null && maghrib != null ? minToTime(maghrib + (fajr + 1440 - maghrib) / 2) : null);
+  return out;
+}
+
+// ---------- Prayer tracker ----------
+// log[date][prayer] = 'p' (prayed) | 'm' (missed)
+function dayCount(log, key) {
+  return FIVE_PRAYERS.filter((p) => log[key]?.[p] === 'p').length;
+}
+function currentPrayerStreak(log, todayKey) {
+  const full = (k) => dayCount(log, k) === 5;
+  let k = full(todayKey) ? todayKey : addDaysKey(todayKey, -1); // today may still be in progress
+  let n = 0;
+  while (full(k) && n < 3650) {
+    n++;
+    k = addDaysKey(k, -1);
+  }
+  return n;
+}
+function bestPrayerStreak(log) {
+  const keys = Object.keys(log).filter((k) => dayCount(log, k) === 5).sort();
+  let best = 0;
+  let run = 0;
+  let prev = null;
+  keys.forEach((k) => {
+    run = prev && addDaysKey(prev, 1) === k ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = k;
+  });
+  return best;
+}
+// Pending qada per prayer = missed (logged) + owed (added by hand) - made up.
+function pendingQada(log, extra = {}, madeUp = {}) {
+  const out = {};
+  FIVE_PRAYERS.forEach((p) => {
+    const missed = Object.values(log).filter((day) => day?.[p] === 'm').length;
+    out[p] = Math.max(0, missed + (extra[p] || 0) - (madeUp[p] || 0));
+  });
+  return out;
+}
+
+// ---------- Streak for a set of date keys (adhkar) ----------
+function streakFromKeys(keys, todayKey) {
+  const set = new Set(keys);
+  let k = set.has(todayKey) ? todayKey : addDaysKey(todayKey, -1);
+  let n = 0;
+  while (set.has(k) && n < 3650) {
+    n++;
+    k = addDaysKey(k, -1);
+  }
+  return n;
+}
+
+// ---------- Sunnah fasting days ----------
+// `hijri` = { m, d } for that date (or null if the browser lacks the Islamic calendar).
+function sunnahFastInfo(date, hijri) {
+  if (hijri) {
+    const { m, d } = hijri;
+    if (m === 9) return null; // Ramadan: obligatory, not a "sunnah" day
+    if (m === 10 && d === 1) return null; // Eid al-Fitr: fasting is forbidden
+    if (m === 12 && d >= 10 && d <= 13) return null; // Eid al-Adha + Tashreeq: forbidden
+    if (m === 12 && d === 9) return { label: 'Day of Arafah', kind: 'arafah' };
+    if (m === 1 && d === 10) return { label: 'Ashura (10 Muharram)', kind: 'ashura' };
+    if (m === 1 && d === 9) return { label: "Tasu'a (9 Muharram), fast with Ashura", kind: 'ashura' };
+    if (d >= 13 && d <= 15) return { label: 'White Day (Ayyam al-Bid)', kind: 'white' };
+  }
+  const wd = date.getDay();
+  if (wd === 1) return { label: 'Monday', kind: 'weekly' };
+  if (wd === 4) return { label: 'Thursday', kind: 'weekly' };
+  return null;
+}
+
+// "HH:MM:SS" countdown text
+function fmtCountdown(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+/* ==================== Worship hub: Tasbih, Adhkar, Prayer tracker, Ramadan, Offline ==================== */
+
+const LS_TASBIH = 'quran_reader_tasbih_v1';
+const LS_ADHKAR = 'quran_reader_adhkar_v1';
+const LS_PRAYER_LOG = 'quran_reader_prayer_log_v1';
+const LS_FAST_LOG = 'quran_reader_fast_log_v1';
+const LS_TARAWEEH = 'quran_reader_taraweeh_v1';
+const LS_EXTRA_REM = 'quran_reader_extra_reminders_v1';
+const API_CACHE_NAME = 'quran-api-v1'; // must match public/sw.js
+const AUDIO_CACHE_NAME = 'quran-audio-v1'; // must match public/sw.js
+const DEFAULT_EXTRA_REM = { duha: false, tahajjud: false, kahf: false, suhoor: false, iftar: false, sunnahFast: false };
+
+function getHijriAdjust() {
+  const v = parseInt(localStorage.getItem(LS_HIJRI_ADJUST), 10);
+  return [-1, 0, 1].includes(v) ? v : 0;
 }
 
 function usePersisted(key, initial) {
@@ -4579,8 +4941,110 @@ function usePersisted(key, initial) {
   return [value, setValue];
 }
 
+function useTick(ms) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setN((x) => x + 1), ms);
+    return () => clearInterval(id);
+  }, [ms]);
+  return n;
+}
+
+// Seconds since midnight in a given IANA timezone (prayer times are in the prayer location's time).
+function zonedClock(tz) {
+  const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' };
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-CA', tz ? { ...opts, timeZone: tz } : opts).formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat('en-CA', opts).formatToParts(new Date());
+  }
+  const g = (type) => parseInt(parts.find((p) => p.type === type)?.value || '0', 10);
+  const pad = (n) => String(n).padStart(2, '0');
+  return { date: `${g('year')}-${pad(g('month'))}-${pad(g('day'))}`, seconds: (g('hour') % 24) * 3600 + g('minute') * 60 + g('second') };
+}
+
+// Today's timings for a saved location, refreshed when the date changes there.
+function useTodayTimings(location) {
+  const [state, setState] = useState({ times: null, tz: null, date: null, error: false });
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => {
+    if (!location) return undefined;
+    let cancelled = false;
+    const load = () => {
+      const ts = Math.floor(Date.now() / 1000);
+      fetch(`${ADHAN_API}/timings/${ts}?latitude=${location.lat}&longitude=${location.lon}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          if (cancelled) return;
+          const times = {};
+          Object.keys(data.data.timings).forEach((k) => {
+            times[k] = String(data.data.timings[k]).split(' ')[0];
+          });
+          const [dd, mm, yyyy] = String(data.data.date?.gregorian?.date || '').split('-');
+          setState({ times, tz: data.data.meta?.timezone || null, date: yyyy ? `${yyyy}-${mm}-${dd}` : null, error: false });
+        })
+        .catch(() => {
+          if (!cancelled) setState((s) => ({ ...s, error: true }));
+        });
+    };
+    load();
+    const iv = setInterval(() => {
+      const cur = stateRef.current;
+      if (cur.date && zonedClock(cur.tz).date !== cur.date) load();
+    }, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [location?.lat, location?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
+  return state;
+}
+
+function vibrationSupported() {
+  return typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function';
+}
+
+// Most phones can't produce a pulse shorter than ~20-30 ms (it is simply not felt), so single
+// pulses are floored at 30 ms. Returns false when the browser has no vibration support at all
+// (iPhone/iPad Safari and most laptops).
 function buzz(pattern) {
-  if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(pattern);
+  if (!vibrationSupported()) return false;
+  try {
+    return navigator.vibrate(Array.isArray(pattern) ? pattern : Math.max(30, pattern));
+  } catch {
+    return false;
+  }
+}
+
+// A very short, quiet tick for devices that cannot vibrate (or when the phone is on silent-vibrate).
+let tickCtx = null;
+function playTick(double = false) {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    tickCtx = tickCtx || new AC();
+    if (tickCtx.state === 'suspended') tickCtx.resume();
+    const beep = (at, freq) => {
+      const o = tickCtx.createOscillator();
+      const g = tickCtx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.2, at + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+      o.connect(g);
+      g.connect(tickCtx.destination);
+      o.start(at);
+      o.stop(at + 0.08);
+    };
+    const now = tickCtx.currentTime;
+    beep(now, double ? 1100 : 820);
+    if (double) beep(now + 0.11, 1320);
+  } catch {
+    // audio not available — silently skip
+  }
 }
 
 /* ---------------- Tasbih ---------------- */
@@ -4599,12 +5063,13 @@ const TASBIH_GUIDED = [
   { id: 'alhamdulillah', target: 33 },
   { id: 'allahu-akbar', target: 34 },
 ];
-const TASBIH_DEFAULT = { preset: 'subhanallah', count: 0, target: 33, vibrate: true, guided: false, step: 0, totals: {}, allTime: {} };
+const TASBIH_DEFAULT = { preset: 'subhanallah', count: 0, target: 33, vibrate: true, sound: false, guided: false, step: 0, totals: {}, allTime: {} };
 
 function TasbihPanel({ t }) {
   const [saved, setSaved] = usePersisted(LS_TASBIH, TASBIH_DEFAULT);
   const st = { ...TASBIH_DEFAULT, ...saved };
   const [flash, setFlash] = useState(false);
+  const [vibMsg, setVibMsg] = useState('');
   const preset = TASBIH_PRESETS.find((p) => p.id === st.preset) || TASBIH_PRESETS[0];
   const today = dateKey();
   const todayTotal = Object.values(st.totals[today] || {}).reduce((a, b) => a + b, 0);
@@ -4613,8 +5078,19 @@ function TasbihPanel({ t }) {
   const C = 2 * Math.PI * R;
   const progress = st.target > 0 ? Math.min(1, st.count / st.target) : 0;
 
-  const vib = (p) => {
-    if (st.vibrate) buzz(p);
+  // Feedback on every tap: vibration and/or a soft tick; the end of a round gets a stronger cue.
+  const feedback = (kind) => {
+    if (st.vibrate) buzz(kind === 'round' ? [150, 80, 150] : 35);
+    if (st.sound) playTick(kind === 'round');
+  };
+
+  const testVibration = () => {
+    if (!vibrationSupported()) {
+      setVibMsg("This browser or device doesn't support vibration (iPhone, iPad and most laptops don't). Turn on Sound for tap feedback.");
+      return;
+    }
+    buzz([200, 100, 200]);
+    setVibMsg("A vibration was sent. If you felt nothing, check your phone's vibration / touch-feedback settings and that battery saver is off.");
   };
 
   const tap = () => {
@@ -4628,7 +5104,7 @@ function TasbihPanel({ t }) {
     const allTime = { ...st.allTime, [st.preset]: (st.allTime[st.preset] || 0) + 1 };
     let next = { ...st, count: st.count + 1, totals: prunedTotals, allTime };
     if (st.target > 0 && next.count >= st.target) {
-      vib([80, 60, 80]);
+      feedback('round');
       setFlash(true);
       setTimeout(() => setFlash(false), 900);
       if (st.guided && st.step < 2) {
@@ -4640,7 +5116,7 @@ function TasbihPanel({ t }) {
         next = { ...next, count: 0 };
       }
     } else {
-      vib(12);
+      feedback('tap');
     }
     setSaved(next);
   };
@@ -4737,7 +5213,25 @@ function TasbihPanel({ t }) {
           >
             Vibration {st.vibrate ? 'on' : 'off'}
           </button>
+          <button
+            onClick={() => {
+              const next = !st.sound;
+              setSaved({ ...st, sound: next });
+              if (next) playTick(); // also unlocks audio on iPhone, which needs a tap first
+            }}
+            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${st.sound ? t.accent : t.textFaint}`}
+          >
+            Sound {st.sound ? 'on' : 'off'}
+          </button>
+          <button onClick={testVibration} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+            Test vibration
+          </button>
         </div>
+        {(vibMsg || !vibrationSupported()) && (
+          <p className={`text-[11px] text-center max-w-xs mt-2 leading-snug ${t.textMuted}`}>
+            {vibMsg || "This device doesn't support vibration (iPhone, iPad and most laptops don't). Turn on Sound for tap feedback."}
+          </p>
+        )}
 
         {!st.guided && (
           <div className="flex items-center justify-center gap-1.5 mt-4">
@@ -4789,13 +5283,1006 @@ function TasbihPanel({ t }) {
   );
 }
 
-function TasbihSection({ t }) {
+/* ---------------- Adhkar ---------------- */
+
+// Items marked `ref` reuse the Arabic/transliteration/translation from the DUAS list (single source of truth).
+const ADHKAR = [
+  { id: 'kursi', sessions: ['morning', 'evening', 'after'], ref: 'sihr-ayatul-kursi', count: 1, source: "Qur'an 2:255. After every obligatory prayer: an-Nasa'i (Amal al-Yawm wal-Laylah)." },
+  { id: 'quls', sessions: ['morning', 'evening'], ref: 'sihr-three-quls', count: 3, source: 'Abu Dawud, at-Tirmidhi: three times each, morning and evening.' },
+  { id: 'quls-after', sessions: ['after'], ref: 'sihr-three-quls', count: 1, source: 'Abu Dawud: after every prayer (three times each after Fajr and Maghrib).' },
+  { id: 'asbahna', sessions: ['morning'], count: 1, source: 'Sahih Muslim.',
+    arabic: 'أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذَا الْيَوْمِ وَخَيْرَ مَا بَعْدَهُ، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذَا الْيَوْمِ وَشَرِّ مَا بَعْدَهُ، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
+    translit: "Asbahna wa asbahal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhal-yawmi wa khayra ma ba'dah, wa a'udhu bika min sharri ma fi hadhal-yawmi wa sharri ma ba'dah. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
+    translation: 'We have reached the morning and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this day and the good of what follows it, and I seek refuge in You from the evil of this day and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+  { id: 'amsayna', sessions: ['evening'], count: 1, source: 'Sahih Muslim.',
+    arabic: 'أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذِهِ اللَّيْلَةِ وَخَيْرَ مَا بَعْدَهَا، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذِهِ اللَّيْلَةِ وَشَرِّ مَا بَعْدَهَا، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
+    translit: "Amsayna wa amsal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhihil-laylah wa khayra ma ba'daha, wa a'udhu bika min sharri ma fi hadhihil-laylah wa sharri ma ba'daha. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
+    translation: 'We have reached the evening and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this night and the good of what follows it, and I seek refuge in You from the evil of this night and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+  { id: 'bika-asbahna', sessions: ['morning'], count: 1, source: 'at-Tirmidhi.',
+    arabic: 'اللَّهُمَّ بِكَ أَصْبَحْنَا، وَبِكَ أَمْسَيْنَا، وَبِكَ نَحْيَا، وَبِكَ نَمُوتُ، وَإِلَيْكَ النُّشُورُ',
+    translit: "Allahumma bika asbahna, wa bika amsayna, wa bika nahya, wa bika namutu, wa ilaykan-nushur",
+    translation: 'O Allah, by You we reach the morning and by You we reach the evening; by You we live and by You we die, and to You is the resurrection.' },
+  { id: 'bika-amsayna', sessions: ['evening'], count: 1, source: 'at-Tirmidhi.',
+    arabic: 'اللَّهُمَّ بِكَ أَمْسَيْنَا، وَبِكَ أَصْبَحْنَا، وَبِكَ نَحْيَا، وَبِكَ نَمُوتُ، وَإِلَيْكَ الْمَصِيرُ',
+    translit: "Allahumma bika amsayna, wa bika asbahna, wa bika nahya, wa bika namutu, wa ilaykal-masir",
+    translation: 'O Allah, by You we reach the evening and by You we reach the morning; by You we live and by You we die, and to You is the final return.' },
+  { id: 'sayyid', sessions: ['morning', 'evening'], ref: 'akhirah-sayyidul-istighfar', count: 1, source: 'Sahih al-Bukhari.' },
+  { id: 'nothing-harms', sessions: ['morning', 'evening'], ref: 'sihr-nothing-harms', count: 3, source: 'Abu Dawud, at-Tirmidhi.' },
+  { id: 'radiytu', sessions: ['morning', 'evening'], count: 3, source: 'Abu Dawud, at-Tirmidhi, Ahmad.',
+    arabic: 'رَضِيتُ بِاللَّهِ رَبًّا، وَبِالْإِسْلَامِ دِينًا، وَبِمُحَمَّدٍ نَبِيًّا',
+    translit: "Raditu billahi Rabban, wa bil-Islami dinan, wa bi-Muhammadin nabiyyan",
+    translation: 'I am pleased with Allah as my Lord, with Islam as my religion, and with Muhammad ﷺ as my Prophet.' },
+  { id: 'afini', sessions: ['morning', 'evening'], count: 3, source: 'Abu Dawud.',
+    arabic: 'اللَّهُمَّ عَافِنِي فِي بَدَنِي، اللَّهُمَّ عَافِنِي فِي سَمْعِي، اللَّهُمَّ عَافِنِي فِي بَصَرِي، لَا إِلَٰهَ إِلَّا أَنْتَ',
+    translit: "Allahumma 'afini fi badani, Allahumma 'afini fi sam'i, Allahumma 'afini fi basari, la ilaha illa Ant",
+    translation: 'O Allah, grant me health in my body. O Allah, grant me health in my hearing. O Allah, grant me health in my sight. There is no god but You.' },
+  { id: 'tahlil-10', sessions: ['morning', 'evening'], count: 10, source: 'Reported by Abu Dawud and an-Nasa\'i for ten times; saying it 100 times in a day is reported in Bukhari and Muslim.',
+    arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ',
+    translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir",
+    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and His is the praise, and He is able to do all things.' },
+  { id: 'subhanallah-bihamdihi', sessions: ['morning', 'evening'], count: 100, source: 'Sahih Muslim: whoever says it 100 times morning and evening.',
+    arabic: 'سُبْحَانَ اللَّهِ وَبِحَمْدِهِ',
+    translit: 'Subhanallahi wa bihamdih',
+    translation: 'Glory be to Allah and praise be to Him.' },
+  { id: 'istighfar-100', sessions: ['morning', 'evening'], count: 100, source: 'Sahih Muslim: the Prophet ﷺ sought forgiveness 100 times a day. Do as many as you can.',
+    arabic: 'أَسْتَغْفِرُ اللَّهَ وَأَتُوبُ إِلَيْهِ',
+    translit: "Astaghfirullaha wa atubu ilayh",
+    translation: "I seek Allah's forgiveness and turn to Him in repentance." },
+
+  // ----- After prayer -----
+  { id: 'astaghfirullah-3', sessions: ['after'], count: 3, source: 'Sahih Muslim.',
+    arabic: 'أَسْتَغْفِرُ اللَّهَ',
+    translit: 'Astaghfirullah',
+    translation: 'I seek forgiveness from Allah.' },
+  { id: 'antas-salam', sessions: ['after'], count: 1, source: 'Sahih Muslim.',
+    arabic: 'اللَّهُمَّ أَنْتَ السَّلَامُ وَمِنْكَ السَّلَامُ، تَبَارَكْتَ يَا ذَا الْجَلَالِ وَالْإِكْرَامِ',
+    translit: "Allahumma Antas-Salam, wa minkas-salam, tabarakta ya Dhal-Jalali wal-Ikram",
+    translation: 'O Allah, You are Peace and from You comes peace. Blessed are You, O Possessor of majesty and honour.' },
+  { id: 'after-subhanallah', sessions: ['after'], count: 33, source: 'Sahih Muslim.',
+    arabic: 'سُبْحَانَ اللَّهِ', translit: 'SubhanAllah', translation: 'Glory be to Allah.' },
+  { id: 'after-alhamdulillah', sessions: ['after'], count: 33, source: 'Sahih Muslim.',
+    arabic: 'الْحَمْدُ لِلَّهِ', translit: 'Alhamdulillah', translation: 'All praise is for Allah.' },
+  { id: 'after-allahu-akbar', sessions: ['after'], count: 34, source: 'Sahih Muslim (33, 33, 34).',
+    arabic: 'اللَّهُ أَكْبَرُ', translit: 'Allahu Akbar', translation: 'Allah is the Greatest.' },
+  { id: 'la-mani', sessions: ['after'], count: 1, source: 'Sahih al-Bukhari and Sahih Muslim.',
+    arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، اللَّهُمَّ لَا مَانِعَ لِمَا أَعْطَيْتَ، وَلَا مُعْطِيَ لِمَا مَنَعْتَ، وَلَا يَنْفَعُ ذَا الْجَدِّ مِنْكَ الْجَدُّ',
+    translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir. Allahumma la mani'a lima a'tayta, wa la mu'tiya lima mana'ta, wa la yanfa'u dhal-jaddi minkal-jadd",
+    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and the praise, and He is able to do all things. O Allah, none can withhold what You give, none can give what You withhold, and the might of the mighty cannot benefit them against You.' },
+  { id: 'a-inni', sessions: ['after'], count: 1, source: "Abu Dawud, an-Nasa'i: the Prophet ﷺ told Mu'adh to say it after every prayer.",
+    arabic: 'اللَّهُمَّ أَعِنِّي عَلَىٰ ذِكْرِكَ وَشُكْرِكَ وَحُسْنِ عِبَادَتِكَ',
+    translit: "Allahumma a'inni 'ala dhikrika wa shukrika wa husni 'ibadatik",
+    translation: 'O Allah, help me to remember You, to thank You, and to worship You well.' },
+];
+const ADHKAR_SESSIONS = [
+  { key: 'morning', label: 'Morning', hint: 'After Fajr until sunrise is best; valid until Dhuhr' },
+  { key: 'evening', label: 'Evening', hint: 'After Asr until Maghrib is best' },
+  { key: 'after', label: 'After prayer', hint: 'After each obligatory prayer' },
+];
+
+function AdhkarPanel({ t }) {
+  const [store, setStore] = usePersisted(LS_ADHKAR, { date: dateKey(), progress: {}, done: {} });
+  const today = dateKey();
+  // A new day starts with fresh counters (streak history is kept).
+  const cur = store.date === today ? store : { ...store, date: today, progress: {} };
+  const [session, setSession] = useState(() => (new Date().getHours() < 12 ? 'morning' : 'evening'));
+  const [open, setOpen] = useState({});
+
+  const items = ADHKAR.filter((i) => i.sessions.includes(session));
+  const progress = cur.progress[session] || {};
+  const totalCount = items.length;
+  const doneCount = items.filter((i) => (progress[i.id] || 0) >= i.count).length;
+  const allDone = totalCount > 0 && doneCount === totalCount;
+  const doneKeys = cur.done?.[session] || [];
+
+  useEffect(() => {
+    if (allDone && !doneKeys.includes(today)) {
+      setStore({ ...cur, done: { ...cur.done, [session]: [...doneKeys, today].slice(-120) } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allDone, session]);
+
+  const setCount = (id, n) =>
+    setStore({ ...cur, progress: { ...cur.progress, [session]: { ...progress, [id]: n } } });
+  const tapItem = (item) => {
+    const n = progress[item.id] || 0;
+    if (n >= item.count) return;
+    buzz(n + 1 >= item.count ? [70, 50, 70] : 30);
+    setCount(item.id, n + 1);
+  };
+  const resetSession = () => setStore({ ...cur, progress: { ...cur.progress, [session]: {} } });
+
+  const streak = streakFromKeys(doneKeys, today);
+
   return (
-    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-28">
-      <TasbihPanel t={t} />
+    <div className="space-y-4">
+      <div className={`inline-flex rounded-full border p-0.5 ${t.divider}`}>
+        {ADHKAR_SESSIONS.map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setSession(s.key)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition ${
+              session === s.key ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${allDone ? t.cardActive : t.cardBg}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold">
+              {allDone ? '✓ All done. May Allah accept it.' : `${doneCount} of ${totalCount} done`}
+            </div>
+            <div className={`text-xs mt-0.5 ${t.textMuted}`}>{ADHKAR_SESSIONS.find((s) => s.key === session)?.hint}</div>
+          </div>
+          <div className="text-right shrink-0">
+            <div className={`text-lg font-semibold ${t.accent}`}>{streak}</div>
+            <div className={`text-[10px] ${t.textMuted}`}>day streak</div>
+          </div>
+        </div>
+        <div className={`h-1.5 rounded-full mt-3 overflow-hidden ${t.divider} border`}>
+          <div className={`h-full ${t.accentBg}`} style={{ width: `${totalCount ? (doneCount / totalCount) * 100 : 0}%`, transition: 'width 0.2s' }} />
+        </div>
+      </div>
+
+      {items.map((item) => {
+        const base = item.ref ? DUAS.find((d) => d.id === item.ref) : null;
+        const arabic = item.arabic || base?.arabic || '';
+        const translit = item.translit || base?.translit || '';
+        const translation = item.translation || base?.translation || '';
+        const n = progress[item.id] || 0;
+        const complete = n >= item.count;
+        const isOpen = !!open[item.id];
+        return (
+          <div key={item.id} className={`rounded-3xl border px-4 py-4 ${complete ? t.cardActive : t.cardBg}`}>
+            <p className="font-arabic text-2xl leading-[2.2] text-right" dir="rtl">
+              {arabic}
+            </p>
+            {isOpen && (
+              <div className="mt-3 space-y-2">
+                <p className={`text-xs italic leading-relaxed ${t.textMuted}`}>{translit}</p>
+                <p className="text-sm leading-relaxed">{translation}</p>
+                <p className={`text-[11px] ${t.textFaint}`}>{item.source}</p>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-2 mt-3">
+              <button onClick={() => setOpen({ ...open, [item.id]: !isOpen })} className={`text-xs ${t.textMuted} underline-offset-2 hover:underline`}>
+                {isOpen ? 'Hide meaning' : 'Show meaning'}
+              </button>
+              <div className="flex items-center gap-2">
+                {item.count > 1 && !complete && (
+                  <button onClick={() => setCount(item.id, item.count)} className={`text-[11px] ${t.textFaint} hover:underline`}>
+                    Mark done
+                  </button>
+                )}
+                {n > 0 && (
+                  <button onClick={() => setCount(item.id, 0)} className={`text-[11px] ${t.textFaint} hover:underline`}>
+                    Reset
+                  </button>
+                )}
+                <button
+                  onClick={() => tapItem(item)}
+                  disabled={complete}
+                  className={`min-w-[84px] px-4 py-2 rounded-full text-sm font-semibold tabular-nums touch-manipulation ${
+                    complete ? 'bg-emerald-600/20 text-emerald-500' : `${t.accentBg} text-white active:scale-95`
+                  }`}
+                  aria-label={`Count, ${n} of ${item.count}`}
+                >
+                  {complete ? '✓' : `${n} / ${item.count}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="flex justify-center">
+        <button onClick={resetSession} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+          Reset this list
+        </button>
+      </div>
+      <p className={`text-[11px] text-center leading-relaxed ${t.textFaint}`}>
+        Sources are named on each card. Please have a knowledgeable person proofread the Arabic.
+      </p>
     </div>
   );
 }
+
+function SwitchRow({ t, label, hint, on, onChange }) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      role="switch"
+      aria-checked={on}
+      className={`w-full flex items-center justify-between gap-3 text-left px-4 py-3 rounded-2xl border ${t.cardBg}`}
+    >
+      <span className="min-w-0">
+        <span className="block text-sm">{label}</span>
+        {hint && <span className={`block text-xs mt-0.5 leading-snug ${t.textMuted}`}>{hint}</span>}
+      </span>
+      <span className={`shrink-0 w-10 h-6 rounded-full relative transition ${on ? t.accentBg : 'bg-gray-400/40'}`}>
+        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+    </button>
+  );
+}
+
+/* ---------------- Prayer tracker ---------------- */
+
+const TRACKER_PRAYERS = [
+  { key: 'Fajr', ar: 'الفجر' },
+  { key: 'Dhuhr', ar: 'الظهر' },
+  { key: 'Asr', ar: 'العصر' },
+  { key: 'Maghrib', ar: 'المغرب' },
+  { key: 'Isha', ar: 'العشاء' },
+];
+
+function PrayerTrackerPanel({ t }) {
+  const [saved, setSaved] = usePersisted(LS_PRAYER_LOG, { log: {}, extra: {}, madeUp: {} });
+  const data = { log: {}, extra: {}, madeUp: {}, ...saved };
+  const today = dateKey();
+  const [offset, setOffset] = useState(0); // 0 = today, -1 = yesterday ...
+  const key = addDaysKey(today, offset);
+  const dayLog = data.log[key] || {};
+
+  const setPrayerState = (prayer, state) => {
+    const day = { ...dayLog };
+    if (state) day[prayer] = state;
+    else delete day[prayer];
+    const log = { ...data.log };
+    if (Object.keys(day).length) log[key] = day;
+    else delete log[key];
+    setSaved({ ...data, log });
+  };
+  const cycle = (prayer) => {
+    const cur = dayLog[prayer];
+    setPrayerState(prayer, cur === 'p' ? 'm' : cur === 'm' ? null : 'p');
+    buzz(10);
+  };
+  const markAll = () => {
+    const day = {};
+    FIVE_PRAYERS.forEach((p) => {
+      day[p] = 'p';
+    });
+    setSaved({ ...data, log: { ...data.log, [key]: day } });
+    buzz([30, 30, 30]);
+  };
+
+  const streak = currentPrayerStreak(data.log, today);
+  const best = bestPrayerStreak(data.log);
+  const pending = pendingQada(data.log, data.extra, data.madeUp);
+  const pendingTotal = Object.values(pending).reduce((a, b) => a + b, 0);
+  const countToday = dayCount(data.log, key);
+
+  const grid = Array.from({ length: 28 }, (_, i) => addDaysKey(today, i - 27));
+  const dayLabel =
+    offset === 0
+      ? 'Today'
+      : offset === -1
+      ? 'Yesterday'
+      : parseKey(key).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+
+  const addMadeUp = (p) => setSaved({ ...data, madeUp: { ...data.madeUp, [p]: (data.madeUp[p] || 0) + 1 } });
+  const addOwed = (p) => setSaved({ ...data, extra: { ...data.extra, [p]: (data.extra[p] || 0) + 1 } });
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
+          <div className={`text-2xl font-semibold ${t.accent}`}>{streak}</div>
+          <div className={`text-xs mt-1 ${t.textMuted}`}>Day streak</div>
+        </div>
+        <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
+          <div className="text-2xl font-semibold">{best}</div>
+          <div className={`text-xs mt-1 ${t.textMuted}`}>Best streak</div>
+        </div>
+        <div className={`rounded-3xl border p-4 text-center ${t.cardBg}`}>
+          <div className={`text-2xl font-semibold ${pendingTotal ? 'text-amber-500' : ''}`}>{pendingTotal}</div>
+          <div className={`text-xs mt-1 ${t.textMuted}`}>Qada owed</div>
+        </div>
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <div className="flex items-center justify-between mb-3">
+          <button
+            onClick={() => setOffset((o) => Math.max(-13, o - 1))}
+            disabled={offset <= -13}
+            className={`p-2 rounded-full ${t.hoverSoft} disabled:opacity-30`}
+            aria-label="Previous day"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="text-center">
+            <div className="text-sm font-semibold">{dayLabel}</div>
+            <div className={`text-xs ${t.textMuted}`}>{countToday} of 5 prayed</div>
+          </div>
+          <button
+            onClick={() => setOffset((o) => Math.min(0, o + 1))}
+            disabled={offset >= 0}
+            className={`p-2 rounded-full ${t.hoverSoft} disabled:opacity-30`}
+            aria-label="Next day"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {TRACKER_PRAYERS.map((p) => {
+            const s = dayLog[p.key];
+            return (
+              <button
+                key={p.key}
+                onClick={() => cycle(p.key)}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border transition ${
+                  s === 'p' ? t.cardActive : s === 'm' ? 'border-red-500/40 bg-red-500/5' : `${t.divider} ${t.hoverSoft}`
+                }`}
+              >
+                <span className="flex items-center gap-3">
+                  <span className="font-arabic text-lg w-14 text-right" dir="rtl">{p.ar}</span>
+                  <span className="text-sm">{p.key}</span>
+                </span>
+                <span
+                  className={`text-xs font-medium px-3 py-1 rounded-full ${
+                    s === 'p' ? 'bg-emerald-600/20 text-emerald-500' : s === 'm' ? 'bg-red-500/15 text-red-500' : `${t.textFaint}`
+                  }`}
+                >
+                  {s === 'p' ? '✓ Prayed' : s === 'm' ? 'Missed' : 'Tap to log'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between mt-3">
+          <p className={`text-[11px] ${t.textFaint}`}>Tap once for prayed, twice for missed, three times to clear.</p>
+          <button onClick={markAll} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+            All prayed
+          </button>
+        </div>
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-3">Last 4 weeks</h3>
+        <div className="grid grid-cols-7 gap-1.5">
+          {grid.map((k) => {
+            const n = dayCount(data.log, k);
+            const missed = FIVE_PRAYERS.some((p) => data.log[k]?.[p] === 'm');
+            return (
+              <div
+                key={k}
+                title={`${k}: ${n}/5`}
+                className={`aspect-square rounded-lg flex items-center justify-center text-[10px] ${
+                  n === 0 ? `border ${t.divider} ${t.textFaint}` : `${t.accentBg} text-white`
+                } ${k === today ? 'ring-2 ring-offset-1 ring-emerald-500/60' : ''}`}
+                style={n > 0 && n < 5 ? { opacity: 0.35 + n * 0.13 } : undefined}
+              >
+                {missed && n === 0 ? '·' : n > 0 ? n : ''}
+              </div>
+            );
+          })}
+        </div>
+        <p className={`text-[11px] mt-2 ${t.textFaint}`}>Number = prayers logged that day. Solid = all five.</p>
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-1">Qada (make-up prayers)</h3>
+        <p className={`text-xs mb-3 leading-relaxed ${t.textMuted}`}>
+          A prayer you log as missed is added here. Tap "Made up" each time you pray one as qada. Use + to add prayers
+          you owe from the past.
+        </p>
+        <div className="space-y-2">
+          {TRACKER_PRAYERS.map((p) => (
+            <div key={p.key} className="flex items-center justify-between gap-2">
+              <span className="text-sm w-20">{p.key}</span>
+              <span className={`text-lg font-semibold tabular-nums w-12 text-center ${pending[p.key] ? 'text-amber-500' : t.textFaint}`}>
+                {pending[p.key]}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => addMadeUp(p.key)}
+                  disabled={!pending[p.key]}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} disabled:opacity-30`}
+                >
+                  Made up
+                </button>
+                <button
+                  onClick={() => addOwed(p.key)}
+                  className={`text-xs w-8 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                  aria-label={`Add one owed ${p.key}`}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Ramadan mode ---------------- */
+
+function RamadanPanel({ t, location, extraRem, setExtra }) {
+  const adjust = getHijriAdjust();
+  useTick(1000); // re-render every second for the countdown
+  const { times, tz, error: timesError } = useTodayTimings(location);
+  const [fastSaved, setFastSaved] = usePersisted(LS_FAST_LOG, { days: {}, madeUp: 0 });
+  const [twSaved, setTwSaved] = usePersisted(LS_TARAWEEH, { rakaat: 8, done: {} });
+  const F = { days: {}, madeUp: 0, ...fastSaved };
+  const TW = { rakaat: 8, done: {}, ...twSaved };
+
+  const today = new Date();
+  const todayKey = dateKey(today);
+  const hj = HIJRI_FMT ? toHijri(today, adjust) : null;
+
+  const ramadan = useMemo(() => {
+    if (!HIJRI_FMT || !hj) return null;
+    if (hj.m === 9) {
+      const first = firstOfHijriMonth(today, adjust);
+      return { active: true, first, len: hijriMonthLength(first, adjust), year: hj.y };
+    }
+    for (let i = 1; i <= 400; i++) {
+      const d = hjAddDays(today, i);
+      const h = toHijri(d, adjust);
+      if (h.m === 9 && h.d === 1) return { active: false, first: d, len: hijriMonthLength(d, adjust), year: h.y, inDays: i };
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey, adjust]);
+
+  const sunnah = useMemo(() => {
+    const out = [];
+    if (!HIJRI_FMT) return out;
+    for (let i = 0; i < 70 && out.length < 8; i++) {
+      const d = hjAddDays(today, i);
+      const h = toHijri(d, adjust);
+      const info = sunnahFastInfo(d, h);
+      if (info) out.push({ date: d, key: dateKey(d), info, h, i });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todayKey, adjust]);
+
+  if (!HIJRI_FMT || !hj) {
+    return <p className={`text-sm text-center py-10 ${t.textMuted}`}>This browser does not support the Islamic calendar.</p>;
+  }
+
+  const clock = zonedClock(tz);
+  let countdown = null;
+  if (times && timeToMin(times.Fajr) != null && timeToMin(times.Maghrib) != null) {
+    const fajr = timeToMin(times.Fajr) * 60;
+    const maghrib = timeToMin(times.Maghrib) * 60;
+    const s = clock.seconds;
+    if (s < fajr) countdown = { label: 'Suhoor ends (Fajr) in', left: fajr - s };
+    else if (s < maghrib) countdown = { label: 'Iftar (Maghrib) in', left: maghrib - s };
+    else countdown = { label: 'Next suhoor ends in', left: fajr + 86400 - s };
+  }
+
+  const cycleFast = (key) => {
+    const cur = F.days[key];
+    const days = { ...F.days };
+    if (cur === 'f') days[key] = 'm';
+    else if (cur === 'm') delete days[key];
+    else days[key] = 'f';
+    setFastSaved({ ...F, days });
+    buzz(10);
+  };
+  const toggleSunnahFast = (key) => {
+    const days = { ...F.days };
+    if (days[key] === 'f') delete days[key];
+    else days[key] = 'f';
+    setFastSaved({ ...F, days });
+  };
+
+  const ramadanDates = ramadan ? Array.from({ length: ramadan.len }, (_, i) => hjAddDays(ramadan.first, i)) : [];
+  const fastedCount = ramadanDates.filter((d) => F.days[dateKey(d)] === 'f').length;
+  const missedAll = Object.values(F.days).filter((v) => v === 'm').length;
+  const qadaPending = Math.max(0, missedAll - F.madeUp);
+
+  const night = ramadan?.active ? hj.d : 1;
+  const twKey = ramadan ? `${ramadan.year}-${night}` : '';
+  const pagesPerRakah = 20 / TW.rakaat; // one juz is 20 pages of the standard Madinah mushaf
+  const pardon = DUAS.find((d) => d.id === 'akhirah-pardon');
+
+  return (
+    <div className="space-y-4">
+      {/* Status */}
+      <div className={`rounded-3xl border px-5 py-5 text-center ${t.cardActive}`}>
+        {ramadan?.active ? (
+          <>
+            <div className="text-xs uppercase tracking-wider mb-1">Ramadan {hj.y}</div>
+            <div className="text-2xl font-semibold">Day {hj.d} of {ramadan.len}</div>
+          </>
+        ) : (
+          <>
+            <div className="text-xs uppercase tracking-wider mb-1">Ramadan {ramadan?.year}</div>
+            <div className="text-2xl font-semibold">
+              {ramadan ? `Begins in about ${ramadan.inDays} days` : 'Not found'}
+            </div>
+            {ramadan && (
+              <div className={`text-xs mt-1 ${t.textMuted}`}>
+                {ramadan.first.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Countdown */}
+      <div className={`rounded-3xl border px-4 py-5 text-center ${t.cardBg}`}>
+        {!location ? (
+          <p className={`text-sm ${t.textMuted}`}>Set your location in the Prayer tab to see suhoor and iftar times.</p>
+        ) : !times ? (
+          <p className={`text-sm ${t.textMuted}`}>{timesError ? 'Could not load today\'s times.' : 'Loading times…'}</p>
+        ) : (
+          <>
+            <div className={`text-xs ${t.textMuted}`}>{countdown.label}</div>
+            <div className="text-4xl font-semibold tabular-nums my-2">{fmtCountdown(countdown.left)}</div>
+            <div className="flex justify-center gap-6 text-sm">
+              <div>
+                <div className={`text-[11px] ${t.textMuted}`}>Suhoor ends</div>
+                <div className="font-semibold tabular-nums">{to12h(times.Fajr)}</div>
+              </div>
+              <div>
+                <div className={`text-[11px] ${t.textMuted}`}>Iftar</div>
+                <div className="font-semibold tabular-nums">{to12h(times.Maghrib)}</div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <SwitchRow
+        t={t}
+        label="Suhoor reminder"
+        hint="45 minutes before Fajr, during Ramadan"
+        on={extraRem.suhoor}
+        onChange={(v) => setExtra('suhoor', v)}
+      />
+      <SwitchRow
+        t={t}
+        label="Iftar reminder"
+        hint="10 minutes before Maghrib, during Ramadan"
+        on={extraRem.iftar}
+        onChange={(v) => setExtra('iftar', v)}
+      />
+      <p className={`text-[11px] px-1 ${t.textFaint}`}>
+        Reminders need the app open in a browser tab, and the Prayer tab location set.
+      </p>
+
+      {/* Fasting tracker */}
+      {ramadan && (
+        <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold">Fasting tracker</h3>
+            <span className={`text-xs ${t.textMuted}`}>{fastedCount} fasted</span>
+          </div>
+          <div className="grid grid-cols-6 sm:grid-cols-10 gap-1.5">
+            {ramadanDates.map((d, i) => {
+              const k = dateKey(d);
+              const s = F.days[k];
+              const future = k > todayKey;
+              return (
+                <button
+                  key={k}
+                  disabled={future}
+                  onClick={() => cycleFast(k)}
+                  aria-label={`Day ${i + 1}`}
+                  className={`aspect-square rounded-xl border text-xs flex flex-col items-center justify-center transition ${
+                    s === 'f'
+                      ? 'bg-emerald-600/25 border-emerald-500/50 text-emerald-500'
+                      : s === 'm'
+                      ? 'bg-red-500/15 border-red-500/40 text-red-500'
+                      : `${t.divider} ${future ? 'opacity-40' : t.hoverSoft}`
+                  } ${k === todayKey ? 'ring-2 ring-emerald-500/60' : ''}`}
+                >
+                  <span className="font-semibold leading-none">{i + 1}</span>
+                  <span className="text-[9px] leading-none mt-0.5">{s === 'f' ? '✓' : s === 'm' ? '✗' : d.getDate()}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p className={`text-[11px] mt-2 ${t.textFaint}`}>Tap: fasted ✓ → missed ✗ → clear. Missed days become qada fasts.</p>
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-current/10">
+            <div>
+              <div className="text-sm">Qada fasts owed</div>
+              <div className={`text-xl font-semibold ${qadaPending ? 'text-amber-500' : ''}`}>{qadaPending}</div>
+            </div>
+            <button
+              disabled={!qadaPending}
+              onClick={() => setFastSaved({ ...F, madeUp: F.madeUp + 1 })}
+              className={`text-xs px-3 py-2 rounded-lg border ${t.divider} ${t.hoverSoft} disabled:opacity-30`}
+            >
+              I made up one fast
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Taraweeh */}
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-1">Taraweeh planner</h3>
+        <div className="flex items-center gap-1.5 mb-3">
+          <span className={`text-xs ${t.textMuted} mr-1`}>Rak'ahs</span>
+          {[8, 20].map((n) => (
+            <button
+              key={n}
+              onClick={() => setTwSaved({ ...TW, rakaat: n })}
+              className={`px-3 py-1 rounded-full text-xs border ${
+                TW.rakaat === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className={`rounded-2xl border px-4 py-3 ${t.divider}`}>
+          <div className="text-xs mb-0.5 text-center">{ramadan?.active ? `Night ${night}` : 'Plan for night 1'}</div>
+          <div className="text-lg font-semibold text-center">Juz {Math.min(night, 30)}</div>
+          <p className={`text-xs text-center mt-1 leading-relaxed ${t.textMuted}`}>
+            One juz a night completes the Qur'an in Taraweeh. At {TW.rakaat} rak'ahs that is about{' '}
+            {Number.isInteger(pagesPerRakah) ? pagesPerRakah : pagesPerRakah.toFixed(1)} page
+            {pagesPerRakah === 1 ? '' : 's'} per rak'ah (a juz is 20 pages).
+          </p>
+          {ramadan?.active && (
+            <button
+              onClick={() => setTwSaved({ ...TW, done: { ...TW.done, [twKey]: !TW.done[twKey] } })}
+              className={`mt-3 w-full text-xs px-3 py-2 rounded-lg ${TW.done[twKey] ? 'bg-emerald-600/20 text-emerald-500' : `${t.accentBg} text-white`}`}
+            >
+              {TW.done[twKey] ? '✓ Tonight completed' : 'Mark tonight complete'}
+            </button>
+          )}
+        </div>
+        {ramadan && (
+          <div className="flex flex-wrap gap-1 mt-3">
+            {Array.from({ length: Math.min(30, ramadan.len) }, (_, i) => (
+              <span
+                key={i}
+                title={`Night ${i + 1}`}
+                className={`w-2.5 h-2.5 rounded-full ${TW.done[`${ramadan.year}-${i + 1}`] ? 'bg-emerald-500' : `border ${t.divider}`}`}
+              />
+            ))}
+          </div>
+        )}
+        <p className={`text-[11px] mt-2 ${t.textFaint}`}>
+          This is a simple pacing guide. Follow the imam's recitation and your local practice.
+        </p>
+      </div>
+
+      {/* Last ten nights */}
+      {ramadan?.active && hj.d >= 19 && (
+        <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+          <h3 className="text-sm font-semibold mb-1">The last ten nights</h3>
+          <p className={`text-xs leading-relaxed mb-3 ${t.textMuted}`}>
+            Seek Laylat al-Qadr in the odd nights of the last ten (Bukhari and Muslim). Nights below are Ramadan{' '}
+            {[21, 23, 25, 27, 29].join(', ')}.
+          </p>
+          {pardon && (
+            <div className={`rounded-2xl border px-3 py-3 ${t.divider}`}>
+              <p className="font-arabic text-xl text-right leading-[2]" dir="rtl">{pardon.arabic}</p>
+              <p className={`text-xs italic mt-2 ${t.textMuted}`}>{pardon.translit}</p>
+              <p className="text-sm mt-1">{pardon.translation}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Sunnah fasts */}
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-1">Sunnah fasts coming up</h3>
+        <p className={`text-xs mb-3 leading-relaxed ${t.textMuted}`}>
+          Mondays and Thursdays, the White Days (13, 14, 15 of each Hijri month), Arafah and Ashura.
+          Six days of Shawwal after Eid are also recommended (Sahih Muslim).
+        </p>
+        <div className="space-y-2">
+          {sunnah.map((s) => (
+            <div key={s.key} className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-sm truncate">{s.info.label}</div>
+                <div className={`text-xs ${t.textMuted}`}>
+                  {s.date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · {s.h.d}{' '}
+                  {HIJRI_MONTHS[s.h.m - 1].en}
+                  {s.i === 0 ? ' · today' : s.i === 1 ? ' · tomorrow' : ''}
+                </div>
+              </div>
+              <button
+                onClick={() => toggleSunnahFast(s.key)}
+                disabled={s.key > todayKey}
+                className={`shrink-0 text-xs px-3 py-1.5 rounded-lg border ${
+                  F.days[s.key] === 'f' ? 'bg-emerald-600/20 text-emerald-500 border-transparent' : `${t.divider} ${t.hoverSoft}`
+                } disabled:opacity-30`}
+              >
+                {F.days[s.key] === 'f' ? '✓ Fasted' : 'I fasted'}
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3">
+          <SwitchRow
+            t={t}
+            label="Remind me the evening before"
+            hint="At Isha, the night before a Sunnah fast"
+            on={extraRem.sunnahFast}
+            onChange={(v) => setExtra('sunnahFast', v)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Install & offline ---------------- */
+
+function formatBytes(n) {
+  if (!n) return '0 MB';
+  const mb = n / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
+function OfflinePanel({ t, installPrompt, onInstall, installed, ayahs, surahMeta, reciter, translationLang }) {
+  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [usage, setUsage] = useState(null);
+  const [job, setJob] = useState(null); // { kind, done, total, failed, finished, error }
+
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
+
+  const refreshUsage = async () => {
+    try {
+      const est = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
+      let api = 0;
+      let audio = 0;
+      if ('caches' in window) {
+        api = (await (await caches.open(API_CACHE_NAME)).keys()).length;
+        audio = (await (await caches.open(AUDIO_CACHE_NAME)).keys()).length;
+      }
+      setUsage({ used: est?.usage || 0, quota: est?.quota || 0, api, audio });
+    } catch {
+      setUsage(null);
+    }
+  };
+  useEffect(() => {
+    refreshUsage();
+  }, []);
+
+  const saveText = async () => {
+    if (!('caches' in window)) {
+      setJob({ kind: 'text', error: 'Offline storage is not available here (it needs HTTPS or localhost).' });
+      return;
+    }
+    const cache = await caches.open(API_CACHE_NAME);
+    const edition = TRANSLATION_OPTIONS[translationLang].edition;
+    const urls = [`${API_BASE}/surah`];
+    for (let n = 1; n <= 114; n++) urls.push(`${API_BASE}/surah/${n}/editions/${buildEditions(reciter, edition)}`);
+    let done = 0;
+    let failed = 0;
+    let next = 0;
+    setJob({ kind: 'text', done: 0, total: urls.length });
+    const worker = async () => {
+      while (next < urls.length) {
+        const u = urls[next++];
+        try {
+          if (!(await cache.match(u))) {
+            const r = await fetch(u);
+            if (r.ok) await cache.put(u, r);
+            else failed++;
+          }
+        } catch {
+          failed++;
+        }
+        done++;
+        setJob({ kind: 'text', done, total: urls.length });
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setJob({ kind: 'text', done, total: urls.length, failed, finished: true });
+    refreshUsage();
+  };
+
+  const saveAudio = async () => {
+    const urls = ayahs.map((a) => a.audioUrl).filter(Boolean);
+    if (!urls.length) return;
+    if (!('caches' in window)) {
+      setJob({ kind: 'audio', error: 'Offline storage is not available here (it needs HTTPS or localhost).' });
+      return;
+    }
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    let done = 0;
+    let failed = 0;
+    let next = 0;
+    setJob({ kind: 'audio', done: 0, total: urls.length });
+    const worker = async () => {
+      while (next < urls.length) {
+        const u = urls[next++];
+        try {
+          if (!(await cache.match(u))) {
+            const r = await fetch(u, { mode: 'cors' });
+            if (r.ok && r.status === 200) await cache.put(u, r);
+            else failed++;
+          }
+        } catch {
+          failed++; // most likely the audio server does not allow this site to save its files
+        }
+        done++;
+        setJob({ kind: 'audio', done, total: urls.length });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setJob({ kind: 'audio', done, total: urls.length, failed, finished: true });
+    refreshUsage();
+  };
+
+  const clearAll = async () => {
+    if (!('caches' in window)) return;
+    await caches.delete(API_CACHE_NAME);
+    await caches.delete(AUDIO_CACHE_NAME);
+    setJob(null);
+    refreshUsage();
+  };
+
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const swSupported = 'serviceWorker' in navigator;
+  const swActive = swSupported && !!navigator.serviceWorker.controller;
+  const isProd = !!import.meta.env.PROD;
+  const busy = job && !job.finished && !job.error;
+
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Install the app</h3>
+            <p className={`text-xs mt-1 leading-relaxed ${t.textMuted}`}>
+              {installed
+                ? 'Installed. You are using it as an app.'
+                : installPrompt
+                ? 'Add it to your home screen or desktop so it opens like a normal app.'
+                : isIOS
+                ? 'On iPhone or iPad: tap the Share button, then "Add to Home Screen".'
+                : 'Use your browser menu: "Install app" (Chrome, Edge) or "Add to Home Screen" (mobile).'}
+            </p>
+          </div>
+          {installPrompt && !installed && (
+            <button onClick={onInstall} className={`shrink-0 text-xs px-4 py-2 rounded-lg ${t.accentBg} text-white`}>
+              Install
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <h3 className="text-sm font-semibold">Offline use</h3>
+          <span className={`text-[11px] px-2 py-0.5 rounded-full ${online ? 'bg-emerald-600/15 text-emerald-500' : 'bg-amber-500/15 text-amber-500'}`}>
+            {online ? 'Online' : 'Offline'}
+          </span>
+        </div>
+        <p className={`text-xs leading-relaxed ${t.textMuted}`}>
+          {!swSupported
+            ? 'This browser does not support offline apps.'
+            : swActive
+            ? 'Offline support is on. The app opens without internet, and any surah you read or listen to is kept.'
+            : isProd
+            ? 'Offline support will switch on after you reload once.'
+            : 'Offline support only runs in the built version of the app: run "npm run build" and then "npm run preview".'}
+        </p>
+
+        <div className="space-y-2 mt-4">
+          <button
+            onClick={saveText}
+            disabled={busy}
+            className={`w-full text-sm px-4 py-2.5 rounded-xl border ${t.divider} ${t.hoverSoft} disabled:opacity-50`}
+          >
+            Save the whole Qur'an text for offline
+          </button>
+          <button
+            onClick={saveAudio}
+            disabled={busy || !ayahs.length}
+            className={`w-full text-sm px-4 py-2.5 rounded-xl border ${t.divider} ${t.hoverSoft} disabled:opacity-50`}
+          >
+            {ayahs.length && surahMeta
+              ? `Save audio of ${surahMeta.englishName} (${ayahs.length} ayahs)`
+              : 'Open a surah first to save its audio'}
+          </button>
+        </div>
+
+        {job && (
+          <div className="mt-3">
+            {job.error ? (
+              <p className="text-xs text-red-500">{job.error}</p>
+            ) : (
+              <>
+                <div className={`h-1.5 rounded-full overflow-hidden border ${t.divider}`}>
+                  <div className={`h-full ${t.accentBg}`} style={{ width: `${(job.done / job.total) * 100}%`, transition: 'width 0.2s' }} />
+                </div>
+                <p className={`text-xs mt-1.5 ${t.textMuted}`}>
+                  {job.finished
+                    ? job.failed
+                      ? `Finished. ${job.total - job.failed} saved, ${job.failed} could not be saved${
+                          job.kind === 'audio' ? ' (the audio server may not allow saving)' : ''
+                        }.`
+                      : 'All saved. ✓'
+                    : `Saving… ${job.done} of ${job.total}`}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        <p className={`text-[11px] mt-3 leading-relaxed ${t.textFaint}`}>
+          Text is saved for your current reciter and translation language; if you change either, save again. Audio is
+          saved for the current reciter only.
+        </p>
+      </div>
+
+      <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
+        <h3 className="text-sm font-semibold mb-2">Storage</h3>
+        {usage ? (
+          <>
+            <p className={`text-xs ${t.textMuted}`}>
+              {usage.api} saved text pages · {usage.audio} saved audio files · app total {formatBytes(usage.used)}
+              {usage.quota ? ` of ${formatBytes(usage.quota)} available` : ''}
+            </p>
+            <button onClick={clearAll} className={`mt-3 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+              Clear saved Qur'an text and audio
+            </button>
+          </>
+        ) : (
+          <p className={`text-xs ${t.textMuted}`}>Storage details are not available in this browser.</p>
+        )}
+        <p className={`text-[11px] mt-3 ${t.textFaint}`}>
+          Your tasbih counts, adhkar, prayer log and settings stay on this device only, and are not uploaded anywhere.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Worship hub ---------------- */
+
+const WORSHIP_TABS = [
+  { key: 'tasbih', label: 'Tasbih' },
+  { key: 'adhkar', label: 'Adhkar' },
+  { key: 'prayers', label: 'Prayers' },
+  { key: 'ramadan', label: 'Ramadan' },
+  { key: 'app', label: 'App' },
+];
+
+function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
+  return (
+    <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16">
+      <div className="flex gap-1.5 overflow-x-auto pb-3 mb-3 -mx-1 px-1">
+        {WORSHIP_TABS.map((x) => (
+          <button
+            key={x.key}
+            onClick={() => setTab(x.key)}
+            className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition ${
+              tab === x.key ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+            }`}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'tasbih' && <TasbihPanel t={t} />}
+      {tab === 'adhkar' && <AdhkarPanel t={t} />}
+      {tab === 'prayers' && <PrayerTrackerPanel t={t} />}
+      {tab === 'ramadan' && <RamadanPanel t={t} location={location} extraRem={extraRem} setExtra={setExtra} />}
+      {tab === 'app' && <OfflinePanel t={t} {...offline} />}
+    </div>
+  );
+}
+
 
 /* ==================== Copyright notice ==================== */
 
