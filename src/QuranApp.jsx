@@ -237,7 +237,7 @@ const DUAS = [
     occasion: "Said on the way home, added to the travel dua",
     arabic: 'آيِبُونَ تَائِبُونَ عَابِدُونَ لِرَبِّنَا حَامِدُونَ',
     translit: "Ayibuna ta'ibuna 'abiduna li-Rabbina hamidun",
-    translation: 'We return, repentant, Ibadahping, and praising our Lord.',
+    translation: 'We return, repentant, worshipping, and praising our Lord.',
   },
   {
     id: 'protection-distress',
@@ -795,7 +795,7 @@ const SALAH_STEPS = [
     translit:
       "Wajjahtu wajhiya lilladhi fataras-samawati wal-arda hanifan wa ma ana minal-mushrikin. Inna salati wa nusuki wa mahyaya wa mamati lillahi Rabbil-'alamin, la sharika lahu wa bidhalika umirtu wa ana minal-muslimin",
     translation:
-      "I have turned my face toward He who created the heavens and the earth, inclining toward truth, and I am not of those who associate partners with Him. Indeed, my prayer, my rites of Ibadah, my living and my dying are for Allah, Lord of the worlds. He has no partner; this I have been commanded, and I am of those who submit to Him",
+      "I have turned my face toward He who created the heavens and the earth, inclining toward truth, and I am not of those who associate partners with Him. Indeed, my prayer, my rites of worship, my living and my dying are for Allah, Lord of the worlds. He has no partner; this I have been commanded, and I am of those who submit to Him",
     note: "Recited silently, just after the opening Takbir, before Al-Fatiha (drawn from Qur'an 6:79 and 6:162–163). A shorter alternative, \"Subhanaka Allahumma wa bihamdika, wa tabarakasmuka, wa ta'ala jadduka, wa la ilaha ghairuk\" (\"Glory is to You, O Allah, and praise; blessed is Your name, exalted is Your majesty, and there is no god besides You\"), is also widely used — which one is customary varies by region and school of thought.",
   },
   {
@@ -986,7 +986,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 export default function QuranApp() {
   // ---------------- App section ----------------
-  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'Ibadah' | 'hijri' | 'progress' | 'learn'
+  const [section, setSection] = useState('quran'); // 'quran' | 'prayer' | 'duas' | 'worship' | 'hijri' | 'progress' | 'learn'
   const [showMoreMenu, setShowMoreMenu] = useState(false);
 
   // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
@@ -995,7 +995,7 @@ export default function QuranApp() {
   const [azanPlaying, setAzanPlaying] = useState(false);
   const [adhanReady, setAdhanReady] = useState(false); // true once the Azan file has loaded
   const [extraRem, setExtraRem] = useState(() => ({ ...DEFAULT_EXTRA_REM, ...loadJSON(LS_EXTRA_REM, {}) }));
-  const [IbadahTab, setIbadahTab] = useState('tasbih');
+  const [worshipTab, setWorshipTab] = useState('tasbih');
   const [mobileMore, setMobileMore] = useState(false);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installed, setInstalled] = useState(
@@ -1026,7 +1026,7 @@ export default function QuranApp() {
     if (!head.querySelector('meta[name="theme-color"]')) {
       const m = document.createElement('meta');
       m.name = 'theme-color';
-      m.content = '#66806B';
+      m.content = '#667C68';
       head.appendChild(m);
     }
     if (!head.querySelector('link[rel="apple-touch-icon"]')) {
@@ -1390,7 +1390,7 @@ export default function QuranApp() {
     link.id = id;
     link.rel = 'stylesheet';
     link.href =
-      'https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;600;700&display=swap';
+      'https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;500;600;700&family=Amiri:wght@400;700&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;600;700&display=swap';
     document.head.appendChild(link);
   }, []);
 
@@ -2078,51 +2078,80 @@ export default function QuranApp() {
   const [panelTab, setPanelTab] = useState('bookmarks'); // 'bookmarks' | 'notes'
 
   // ---------------- Theme tokens ----------------
+  // Design tokens ("Neumorphic Tactile", Version 3): one soft base colour for page AND surfaces; depth comes
+  // only from a light shadow (top-left) and a dark shadow (bottom-right). Raised = interactive/solid,
+  // inset = pressed, selected or an input well. Sage stays the single accent. Every screen reads these tokens.
   const t = isDark
     ? {
-        appBg: 'bg-[#15141A]',
-        headerBg: 'bg-[#15141A]/70 backdrop-blur-xl border-white/10',
-        sidebarBg: 'bg-white/[0.03] backdrop-blur-xl border-white/10',
-        cardBg: 'bg-white/[0.05] backdrop-blur-md border border-white/10 hover:border-white/20 shadow-[0_4px_24px_rgba(0,0,0,0.35)]',
-        cardActive: 'border-[#8FAE86]/50 bg-[#8FAE86]/[0.12] backdrop-blur-md ring-1 ring-[#8FAE86]/30 shadow-[0_4px_24px_rgba(0,0,0,0.35)]',
-        text: 'text-[#F3F1EA]',
-        textMuted: 'text-[#A8A69C]',
-        textFaint: 'text-[#6E6C63]',
-        inputBg: 'bg-white/[0.05] backdrop-blur border-white/10 text-[#F3F1EA] placeholder-[#6E6C63]',
+        appBg: 'bg-[#2B302C]',
+        headerBg: 'bg-[#2B302C]/95 backdrop-blur-xl border-transparent shadow-[0_6px_18px_rgba(0,0,0,0.35)]',
+        sidebarBg: 'bg-[#2B302C] border-transparent',
+        cardBg: 'bg-[#2B302C] border border-transparent shadow-[8px_8px_18px_rgba(0,0,0,0.5),-8px_-8px_18px_rgba(255,255,255,0.045)] transition-[box-shadow,background-color] duration-200',
+        cardActive: 'bg-[#2B302C] border border-transparent shadow-[inset_5px_5px_11px_rgba(0,0,0,0.55),inset_-5px_-5px_11px_rgba(255,255,255,0.05)] ring-1 ring-[#8FAE86]/25',
+        text: 'text-[#E9ECE7]',
+        textMuted: 'text-[#A6ADA5]',
+        textFaint: 'text-[#7B827C]',
+        inputBg: 'bg-[#2B302C] border-transparent shadow-[inset_3px_3px_7px_rgba(0,0,0,0.5),inset_-3px_-3px_7px_rgba(255,255,255,0.045)] text-[#E9ECE7] placeholder-[#7B827C]',
         accent: 'text-[#9DBB93]',
-        accentBg: 'bg-[#66806B] hover:bg-[#75906B]',
+        accentBg: 'bg-[#587160] hover:bg-[#617C69] shadow-[4px_4px_10px_rgba(0,0,0,0.5),-3px_-3px_8px_rgba(255,255,255,0.05)] active:shadow-[inset_3px_3px_7px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(150,185,155,0.18)]',
         divider: 'border-white/10',
-        playerBg: 'bg-[#1B1A20]/95 backdrop-blur-2xl border-white/10 shadow-[0_-4px_32px_rgba(0,0,0,0.4)]',
-        chipMeccan: 'bg-amber-500/10 text-amber-300 border border-amber-400/20',
-        chipMedinan: 'bg-[#8FAE86]/10 text-[#9DBB93] border border-[#8FAE86]/25',
-        hoverSoft: 'hover:bg-white/[0.06]',
-        glassPanel: 'bg-[#1B1A20]/90 backdrop-blur-2xl border border-white/10 shadow-[0_8px_40px_rgba(0,0,0,0.5)]',
-        iconBtn: 'bg-white/[0.04] backdrop-blur-md border border-white/10 shadow-[0_2px_10px_rgba(0,0,0,0.25)] hover:bg-white/[0.09]',
+        playerBg: 'bg-[#2B302C] border-transparent shadow-[8px_8px_20px_rgba(0,0,0,0.55),-8px_-8px_20px_rgba(255,255,255,0.045)]',
+        chipMeccan: 'bg-[#2B302C] text-amber-300 border border-transparent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.045)]',
+        chipMedinan: 'bg-[#2B302C] text-[#9DBB93] border border-transparent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.045)]',
+        hoverSoft: 'hover:bg-white/[0.04] active:shadow-[inset_3px_3px_7px_rgba(0,0,0,0.5),inset_-3px_-3px_7px_rgba(255,255,255,0.045)]',
+        glassPanel: 'bg-[#2B302C] border border-transparent shadow-[8px_8px_20px_rgba(0,0,0,0.55),-8px_-8px_20px_rgba(255,255,255,0.045)]',
+        iconBtn: 'bg-[#2B302C] border border-transparent shadow-[4px_4px_9px_rgba(0,0,0,0.5),-4px_-4px_9px_rgba(255,255,255,0.045)] active:shadow-[inset_3px_3px_7px_rgba(0,0,0,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.045)] transition-[box-shadow,background-color] duration-200',
+        btn: 'bg-[#2B302C] border border-transparent shadow-[4px_4px_9px_rgba(0,0,0,0.5),-4px_-4px_9px_rgba(255,255,255,0.045)] active:shadow-[inset_3px_3px_7px_rgba(0,0,0,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.045)] transition-[box-shadow,background-color] duration-200',
+        btnLg: 'bg-[#2B302C] border border-transparent shadow-[12px_12px_26px_rgba(0,0,0,0.6),-12px_-12px_26px_rgba(255,255,255,0.05)] active:shadow-[inset_8px_8px_18px_rgba(0,0,0,0.6),inset_-8px_-8px_18px_rgba(255,255,255,0.05)] transition-[box-shadow] duration-200',
+        heroBg: 'bg-gradient-to-br from-[#4A6350] to-[#33463A] text-white border border-transparent shadow-[8px_8px_18px_rgba(0,0,0,0.5),-8px_-8px_18px_rgba(255,255,255,0.045)]',
+        sheetBg: 'bg-[#2B302C] border border-transparent shadow-[14px_14px_34px_rgba(0,0,0,0.65),-10px_-10px_26px_rgba(255,255,255,0.05)]',
+        pillTrack: 'bg-[#2B302C] border border-transparent shadow-[inset_3px_3px_7px_rgba(0,0,0,0.5),inset_-3px_-3px_7px_rgba(255,255,255,0.045)]',
+        pillActive: 'bg-[#2B302C] text-[#9DBB93] shadow-[3px_3px_7px_rgba(0,0,0,0.5),-3px_-3px_7px_rgba(255,255,255,0.05)]',
+        pillPressed: 'bg-[#2B302C] text-[#9DBB93] shadow-[inset_3px_3px_7px_rgba(0,0,0,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.045)]',
       }
     : {
-        appBg: 'bg-[#FBF8F2]',
-        headerBg: 'bg-[#FBF8F2]/75 backdrop-blur-xl border-[#E9E2D3]',
-        sidebarBg: 'bg-white/40 backdrop-blur-xl border-[#E9E2D3]',
-        cardBg: 'bg-white/60 backdrop-blur-md border border-white/90 hover:border-[#66806B]/25 shadow-[0_4px_20px_rgba(102,128,107,0.07)]',
-        cardActive: 'border-[#66806B]/40 bg-[#66806B]/[0.08] backdrop-blur-md ring-1 ring-[#66806B]/20 shadow-[0_4px_20px_rgba(102,128,107,0.1)]',
-        text: 'text-[#2B2A27]',
-        textMuted: 'text-[#6B6A63]',
-        textFaint: 'text-[#9A968A]',
-        inputBg: 'bg-white/70 backdrop-blur border-[#E9E2D3] text-[#2B2A27] placeholder-[#9A968A]',
-        accent: 'text-[#4F6753]',
-        accentBg: 'bg-[#66806B] hover:bg-[#597059]',
-        divider: 'border-[#E9E2D3]',
-        playerBg: 'bg-white/95 backdrop-blur-2xl border-[#E9E2D3] shadow-[0_-4px_32px_rgba(102,128,107,0.12)]',
-        chipMeccan: 'bg-amber-50/80 text-amber-700 border border-amber-200',
-        chipMedinan: 'bg-[#66806B]/10 text-[#4F6753] border border-[#66806B]/20',
-        hoverSoft: 'hover:bg-[#66806B]/[0.07]',
-        glassPanel: 'bg-white/85 backdrop-blur-2xl border border-white shadow-[0_8px_40px_rgba(102,128,107,0.18)]',
+        appBg: 'bg-[#E8E5DC]',
+        headerBg: 'bg-[#E8E5DC]/95 backdrop-blur-xl border-transparent shadow-[0_6px_16px_rgba(166,160,141,0.35)]',
+        sidebarBg: 'bg-[#E8E5DC] border-transparent',
+        cardBg: 'bg-[#E8E5DC] border border-transparent shadow-[8px_8px_18px_rgba(166,160,141,0.5),-8px_-8px_18px_rgba(255,255,255,0.95)] transition-[box-shadow,background-color] duration-200',
+        cardActive: 'bg-[#E8E5DC] border border-transparent shadow-[inset_5px_5px_11px_rgba(166,160,141,0.55),inset_-5px_-5px_11px_rgba(255,255,255,0.95)] ring-1 ring-[#667C68]/20',
+        text: 'text-[#2B312C]',
+        textMuted: 'text-[#5E655F]',
+        textFaint: 'text-[#858B82]',
+        inputBg: 'bg-[#E8E5DC] border-transparent shadow-[inset_3px_3px_7px_rgba(166,160,141,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.95)] text-[#2B312C] placeholder-[#858B82]',
+        accent: 'text-[#3F5544]',
+        accentBg: 'bg-[#5A7160] hover:bg-[#516755] shadow-[4px_4px_10px_rgba(63,85,68,0.38),-3px_-3px_8px_rgba(255,255,255,0.85)] active:shadow-[inset_3px_3px_7px_rgba(35,52,40,0.5),inset_-2px_-2px_5px_rgba(120,150,125,0.4)]',
+        divider: 'border-[#B9B5A6]/45',
+        playerBg: 'bg-[#E8E5DC] border-transparent shadow-[8px_8px_20px_rgba(166,160,141,0.55),-8px_-8px_20px_rgba(255,255,255,0.95)]',
+        chipMeccan: 'bg-[#E8E5DC] text-[#8A6A2E] border border-transparent shadow-[inset_2px_2px_5px_rgba(166,160,141,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.95)]',
+        chipMedinan: 'bg-[#E8E5DC] text-[#3F5544] border border-transparent shadow-[inset_2px_2px_5px_rgba(166,160,141,0.55),inset_-2px_-2px_5px_rgba(255,255,255,0.95)]',
+        hoverSoft: 'hover:bg-[#667C68]/[0.06] active:shadow-[inset_3px_3px_7px_rgba(166,160,141,0.5),inset_-3px_-3px_7px_rgba(255,255,255,0.9)]',
+        glassPanel: 'bg-[#E8E5DC] border border-transparent shadow-[8px_8px_20px_rgba(166,160,141,0.55),-8px_-8px_20px_rgba(255,255,255,0.95)]',
+        iconBtn: 'bg-[#E8E5DC] border border-transparent shadow-[4px_4px_9px_rgba(166,160,141,0.55),-4px_-4px_9px_rgba(255,255,255,0.95)] active:shadow-[inset_3px_3px_7px_rgba(166,160,141,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.95)] transition-[box-shadow,background-color] duration-200',
+        btn: 'bg-[#E8E5DC] border border-transparent shadow-[4px_4px_9px_rgba(166,160,141,0.55),-4px_-4px_9px_rgba(255,255,255,0.95)] active:shadow-[inset_3px_3px_7px_rgba(166,160,141,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.95)] transition-[box-shadow,background-color] duration-200',
+        btnLg: 'bg-[#E8E5DC] border border-transparent shadow-[12px_12px_26px_rgba(166,160,141,0.6),-12px_-12px_26px_rgba(255,255,255,0.98)] active:shadow-[inset_8px_8px_18px_rgba(166,160,141,0.6),inset_-8px_-8px_18px_rgba(255,255,255,0.98)] transition-[box-shadow] duration-200',
+        heroBg: 'bg-gradient-to-br from-[#62796A] to-[#46604C] text-white border border-transparent shadow-[8px_8px_18px_rgba(166,160,141,0.55),-8px_-8px_18px_rgba(255,255,255,0.95)]',
+        sheetBg: 'bg-[#E8E5DC] border border-transparent shadow-[14px_14px_34px_rgba(120,115,98,0.45),-10px_-10px_28px_rgba(255,255,255,0.9)]',
+        pillTrack: 'bg-[#E8E5DC] border border-transparent shadow-[inset_3px_3px_7px_rgba(166,160,141,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.95)]',
+        pillActive: 'bg-[#E8E5DC] text-[#3F5544] shadow-[3px_3px_7px_rgba(166,160,141,0.55),-3px_-3px_7px_rgba(255,255,255,0.95)]',
+        pillPressed: 'bg-[#E8E5DC] text-[#3F5544] shadow-[inset_3px_3px_7px_rgba(166,160,141,0.55),inset_-3px_-3px_7px_rgba(255,255,255,0.95)]',
       };
 
   return (
     <div className={`min-h-screen ${t.appBg} ${t.text}`} style={{ fontFamily: "'Inter', sans-serif" }}>
       <style>{`
-        .font-arabic { font-family: 'Amiri', 'Traditional Arabic', serif; }
+        .font-arabic { font-family: 'Noto Naskh Arabic', 'Amiri', 'Traditional Arabic', serif; }
+        /* Motion scale: micro 180ms / standard 300ms / sanctuary 600ms */
+        :root { --motion-micro: 180ms; --motion-standard: 300ms; --motion-sanctuary: 600ms; --ease-serene: cubic-bezier(0.2, 0.7, 0.2, 1); }
+        .transition, .transition-all, .transition-colors, .transition-transform, .transition-opacity, .transition-shadow {
+          transition-duration: var(--motion-micro);
+          transition-timing-function: var(--ease-serene);
+        }
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+        }
+        button:focus-visible, a:focus-visible, input:focus-visible, [role="switch"]:focus-visible { outline: 2px solid #667C68; outline-offset: 2px; }
+        ::selection { background: rgba(102, 124, 104, 0.28); }
         .font-malayalam { font-family: 'Noto Sans Malayalam', sans-serif; }
         .font-hindi { font-family: 'Noto Sans Devanagari', sans-serif; }
         .font-urdu { font-family: 'Noto Nastaliq Urdu', serif; }
@@ -2133,7 +2162,7 @@ export default function QuranApp() {
         }
         input[type="range"]::-webkit-slider-thumb {
           -webkit-appearance: none; margin-top: -5px;
-          width: 14px; height: 14px; border-radius: 9999px; background: #66806B;
+          width: 14px; height: 14px; border-radius: 9999px; background: #667C68;
           box-shadow: 0 0 0 3px rgba(102,128,107,0.2);
         }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -2150,16 +2179,16 @@ export default function QuranApp() {
           {section === 'quran' && mobileView === 'reader' && (
             <button
               onClick={() => setMobileView('list')}
-              className={`md:hidden p-2 -ml-1 rounded-lg ${t.hoverSoft}`}
+              className={`md:hidden p-2 -ml-1 rounded-full ${t.iconBtn}`}
               aria-label="Back to Surah list"
             >
               <ChevronLeft size={20} />
             </button>
           )}
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className={`items-center gap-2 shrink-0 ${section === 'quran' ? 'hidden md:flex' : 'flex'}`}>
             <div
-              className={`w-9 h-9 rounded-lg ${t.accentBg} flex items-center justify-center text-white font-arabic text-lg`}
+              className={`w-10 h-10 rounded-2xl ${t.heroBg} flex items-center justify-center font-arabic text-xl`}
             >
               ق
             </div>
@@ -2169,10 +2198,10 @@ export default function QuranApp() {
             </div>
           </div>
 
-          <div className={`hidden md:flex items-center gap-1 rounded-lg border ${t.divider} p-1 shrink-0`}>
+          <div className={`hidden md:flex items-center gap-1 rounded-2xl ${t.pillTrack} p-1 shrink-0`}>
             <button
               onClick={() => setSection('quran')}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition ${
                 section === 'quran' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
               title="Qur'an"
@@ -2182,7 +2211,7 @@ export default function QuranApp() {
             </button>
             <button
               onClick={() => setSection('prayer')}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition ${
                 section === 'prayer' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
               title="Prayer"
@@ -2192,7 +2221,7 @@ export default function QuranApp() {
             </button>
             <button
               onClick={() => setSection('duas')}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition ${
                 section === 'duas' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
               title="Duas"
@@ -2201,9 +2230,9 @@ export default function QuranApp() {
               <span className="hidden sm:inline">Duas</span>
             </button>
             <button
-              onClick={() => setSection('Ibadah')}
-              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                section === 'Ibadah' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
+              onClick={() => setSection('worship')}
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition ${
+                section === 'worship' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
               }`}
               title="Ibadah: tasbih, adhkar, prayer tracker, Ramadan"
             >
@@ -2214,7 +2243,7 @@ export default function QuranApp() {
             <div className="relative">
               <button
                 onClick={() => setShowMoreMenu((v) => !v)}
-                className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-medium transition ${
                   section === 'progress' || section === 'learn' || section === 'hijri'
                     ? `${t.accentBg} text-white`
                     : `${t.textMuted} ${t.hoverSoft}`
@@ -2273,7 +2302,10 @@ export default function QuranApp() {
             <>
               {mobileView === 'reader' && surahMeta && (
                 <div className="flex-1 min-w-0 text-center md:hidden">
-                  <span className="text-sm font-medium truncate block">{surahMeta.englishName}</span>
+                  <span className="text-sm font-semibold truncate block leading-tight">{surahMeta.englishName}</span>
+                  <span className={`text-[11px] truncate block leading-tight ${t.textMuted}`}>
+                    {surahMeta.numberOfAyahs} Ayahs<span className="hidden min-[420px]:inline"> · {surahMeta.revelationType}</span>
+                  </span>
                 </div>
               )}
               <div
@@ -2281,7 +2313,7 @@ export default function QuranApp() {
                   mobileView === 'reader' ? 'hidden md:flex md:flex-1' : 'flex-1'
                 }`}
               >
-                <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${t.textFaint}`} />
+                <Search size={16} className={`absolute left-3.5 top-1/2 -translate-y-1/2 z-10 pointer-events-none ${t.textFaint}`} />
                 <input
                   value={query}
                   onChange={(e) => {
@@ -2289,8 +2321,8 @@ export default function QuranApp() {
                     setShowBookmarksPanel(false);
                     setMobileView('list');
                   }}
-                  placeholder="Search Surah by name or number…"
-                  className={`w-full pl-9 pr-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+                  placeholder="Search Surah…"
+                  className={`w-full pl-10 pr-3 py-2.5 rounded-2xl border text-sm outline-none focus:ring-2 focus:ring-[#667C68]/40 ${t.inputBg}`}
                 />
               </div>
             </>
@@ -2301,7 +2333,7 @@ export default function QuranApp() {
           {section === 'quran' && (
             <button
               onClick={() => setShowTranslation((v) => !v)}
-              className={`p-2 rounded-lg border ${t.divider} ${t.hoverSoft} flex items-center gap-1.5`}
+              className={`p-2 rounded-xl ${t.iconBtn} flex items-center gap-1.5`}
               title={showTranslation ? 'Hide translation (Arabic-focused reading)' : 'Show translation'}
               aria-label={showTranslation ? 'Hide translation' : 'Show translation'}
               aria-pressed={!showTranslation}
@@ -2320,7 +2352,7 @@ export default function QuranApp() {
                 setPanelTab('bookmarks');
                 setMobileView('list');
               }}
-              className={`relative p-2 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+              className={`relative p-2 rounded-xl ${t.iconBtn}`}
               title="Bookmarks"
               aria-label="Bookmarks"
             >
@@ -2340,7 +2372,7 @@ export default function QuranApp() {
                 setPanelTab('notes');
                 setMobileView('list');
               }}
-              className={`relative p-2 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+              className={`relative p-2 rounded-xl ${t.iconBtn}`}
               title="Notes"
               aria-label="Notes"
             >
@@ -2355,7 +2387,7 @@ export default function QuranApp() {
 
           <button
             onClick={cycleTheme}
-            className={`p-2 rounded-lg border ${t.divider} ${t.hoverSoft} flex items-center gap-1.5`}
+            className={`p-2 rounded-xl ${t.iconBtn} flex items-center gap-1.5`}
             title={
               themeMode === 'auto'
                 ? 'Theme: Automatic (follows device time, 6pm–6am is dark) — click for Dark'
@@ -2387,7 +2419,7 @@ export default function QuranApp() {
                       <div className={`flex items-center gap-1 rounded-lg border ${t.divider} p-1`}>
                         <button
                           onClick={() => setPanelTab('bookmarks')}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                          className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
                             panelTab === 'bookmarks' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
                           }`}
                         >
@@ -2395,7 +2427,7 @@ export default function QuranApp() {
                         </button>
                         <button
                           onClick={() => setPanelTab('notes')}
-                          className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                          className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
                             panelTab === 'notes' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
                           }`}
                         >
@@ -2467,24 +2499,37 @@ export default function QuranApp() {
                   </>
                 ) : (
                   <>
-                    {lastRead && (
-                      <button
-                        onClick={() => selectSurah(lastRead.surahNumber, lastRead.numberInSurah)}
-                        className={`w-full text-left p-3 mb-3 rounded-xl border flex items-center gap-3 ${t.cardBg}`}
-                      >
-                        <div
-                          className={`w-9 h-9 rounded-full ${t.accentBg} text-white flex items-center justify-center shrink-0`}
+                    {lastRead && (() => {
+                      const total = surahList.find((x) => x.number === lastRead.surahNumber)?.numberOfAyahs;
+                      const pct = total ? Math.min(100, Math.round((lastRead.numberInSurah / total) * 100)) : null;
+                      return (
+                        <button
+                          onClick={() => selectSurah(lastRead.surahNumber, lastRead.numberInSurah)}
+                          className={`w-full text-left p-4 mb-4 rounded-[28px] flex flex-col gap-3 transition ${t.heroBg}`}
                         >
-                          <BookOpen size={16} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium">Continue reading</div>
-                          <div className={`text-xs ${t.textMuted} truncate`}>
-                            {lastRead.surahName} · Ayah {lastRead.numberInSurah}
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold">Continue Reading</span>
+                            <BookOpen size={16} className="opacity-70" />
                           </div>
-                        </div>
-                      </button>
-                    )}
+                          <div className="min-w-0">
+                            <div className="text-xs opacity-90 truncate">
+                              {lastRead.surahName} · Ayah {lastRead.numberInSurah}
+                            </div>
+                            {pct !== null && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <div className="h-1.5 flex-1 rounded-full bg-white/20 overflow-hidden">
+                                  <div className="h-full rounded-full bg-white/80" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[11px] opacity-80 tabular-nums">{pct}%</span>
+                              </div>
+                            )}
+                          </div>
+                          <span className="self-start inline-flex items-center gap-1.5 text-xs font-medium px-4 py-1.5 rounded-full bg-white/20 border border-white/25">
+                            Continue <ChevronRight size={13} />
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     {surahListLoading && (
                       <div className="flex items-center justify-center py-16">
@@ -2514,13 +2559,13 @@ export default function QuranApp() {
                         <button
                           key={s.number}
                           onClick={() => selectSurah(s.number)}
-                          className={`w-full text-left p-3 rounded-xl border transition ${
+                          className={`w-full text-left p-3.5 rounded-2xl border transition ${
                             selectedSurah === s.number ? t.cardActive : t.cardBg
                           }`}
                         >
                           <div className="flex items-center gap-3">
                             <div
-                              className={`w-8 h-8 rounded-lg border ${t.divider} flex items-center justify-center text-xs font-semibold shrink-0 ${t.accent}`}
+                              className={`w-9 h-9 rounded-xl ${t.iconBtn} flex items-center justify-center text-xs font-semibold shrink-0 ${t.accent}`}
                             >
                               {s.number}
                             </div>
@@ -2569,7 +2614,7 @@ export default function QuranApp() {
                 {!selectedSurah && (
                   <div className="flex flex-col items-center justify-center text-center py-24">
                     <div
-                      className={`w-16 h-16 rounded-3xl ${t.accentBg} text-white flex items-center justify-center font-arabic text-3xl mb-4`}
+                      className={`w-16 h-16 rounded-[28px] ${t.heroBg} flex items-center justify-center font-arabic text-3xl mb-4`}
                     >
                       ق
                     </div>
@@ -2601,8 +2646,8 @@ export default function QuranApp() {
                           onClick={() => setOn((v) => !v)}
                           aria-pressed={on}
                           className={`flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-medium border transition ${
-                            on ? `${t.divider} ${t.text}` : `${t.divider} ${t.textFaint} line-through`
-                          } ${t.hoverSoft}`}
+                            on ? `${t.pillPressed} ${t.text}` : `${t.btn} ${t.textFaint} line-through`
+                          }`}
                         >
                           {on ? <Eye size={12} /> : <EyeOff size={12} />}
                           {label}
@@ -2617,7 +2662,7 @@ export default function QuranApp() {
                           className={`px-3 py-1 rounded-full text-[11px] font-medium border transition ${
                             translationLang === code
                               ? `${t.accentBg} text-white border-transparent`
-                              : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                              : `${t.btn} ${t.textMuted}`
                           }`}
                         >
                           {opt.label}
@@ -2710,7 +2755,7 @@ export default function QuranApp() {
                       <div className="flex justify-center">
                         <button
                           onClick={() => setSelectMode(true)}
-                          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border ${t.divider} ${t.textMuted} ${t.hoverSoft}`}
+                          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border ${t.btn} ${t.textMuted}`}
                         >
                           <Repeat size={13} />
                           Loop an ayah or range for memorization
@@ -2757,7 +2802,7 @@ export default function QuranApp() {
                           ayahRefs.current[ayah.globalNumber] = el;
                         }}
                         data-global-number={ayah.globalNumber}
-                        className={`relative rounded-3xl border p-5 transition ${
+                        className={`relative rounded-[28px] border p-5 sm:p-6 transition ${
                           isInRange
                             ? 'border-amber-500/60 bg-amber-500/10 ring-1 ring-amber-500/30'
                             : isActive
@@ -2779,10 +2824,10 @@ export default function QuranApp() {
                             aria-label={`Play ayah ${ayah.numberInSurah}`}
                           >
                             <span
-                              className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] transition-colors ${
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
                                 isActive
-                                  ? `${t.accentBg} text-white`
-                                  : `border ${t.divider} ${t.textMuted}`
+                                  ? `${t.accentBg} text-white shadow-sm`
+                                  : `${t.iconBtn} ${t.textMuted}`
                               }`}
                             >
                               {ayah.numberInSurah}
@@ -2803,7 +2848,7 @@ export default function QuranApp() {
                         </div>
 
                         <p
-                          className={`font-arabic text-right leading-[2.3] mb-5 ${
+                          className={`font-arabic text-right leading-[2.4] mb-5 ${
                             beginnerMode ? 'text-5xl leading-[2.6]' : 'text-3xl'
                           }`}
                           dir="rtl"
@@ -2823,12 +2868,40 @@ export default function QuranApp() {
                         {showTranslation && (
                           <p
                             dir={TRANSLATION_OPTIONS[translationLang].dir}
-                            className={`${TRANSLATION_OPTIONS[translationLang].fontClass} leading-relaxed ${t.text} ${
-                              beginnerMode ? 'text-lg' : 'text-base'
+                            className={`${TRANSLATION_OPTIONS[translationLang].fontClass} leading-relaxed ${t.textMuted} ${
+                              beginnerMode ? 'text-lg' : 'text-[15px]'
                             }`}
                           >
                             {ayah.translation}
                           </p>
+                        )}
+
+                        {isActive && !selectMode && (
+                          <div className="mt-5 flex justify-center">
+                            <div className={`inline-flex items-center gap-1 p-1 rounded-full ${t.iconBtn}`}>
+                              <button
+                                onClick={() => (isPlaying ? handlePlayPause() : playAyah(idx))}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center ${t.accentBg} text-white shadow-sm`}
+                                aria-label={isPlaying ? 'Pause this ayah' : 'Play this ayah'}
+                              >
+                                {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+                              </button>
+                              <button
+                                onClick={() => toggleBookmark(ayah)}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center ${t.hoverSoft} ${isBookmarked ? t.accent : t.textMuted}`}
+                                aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark this ayah'}
+                              >
+                                {isBookmarked ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                              </button>
+                              <button
+                                onClick={() => setShareAyah({ ayah, surahMeta })}
+                                className={`w-9 h-9 rounded-full flex items-center justify-center ${t.hoverSoft} ${t.textMuted}`}
+                                aria-label="Share this ayah"
+                              >
+                                <Share2 size={16} />
+                              </button>
+                            </div>
+                          </div>
                         )}
 
                         {note && !isEditingNote && (
@@ -2863,7 +2936,7 @@ export default function QuranApp() {
                                   className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border ${
                                     noteDraft.tags.includes(tag)
                                       ? `${t.accentBg} text-white border-transparent`
-                                      : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                                      : `${t.btn} ${t.textMuted}`
                                   }`}
                                 >
                                   <Tag size={10} />
@@ -2880,7 +2953,7 @@ export default function QuranApp() {
                               </button>
                               <button
                                 onClick={() => setOpenNoteFor(null)}
-                                className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                                className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
                               >
                                 Cancel
                               </button>
@@ -2926,7 +2999,7 @@ export default function QuranApp() {
                 </div>
               ) : (
                 <div
-                  className={`max-w-3xl mx-auto rounded-3xl border pointer-events-auto ${t.playerBg}`}
+                  className={`max-w-3xl mx-auto rounded-[28px] border pointer-events-auto ${t.playerBg}`}
                   style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
                 >
                   {audioWarning && (
@@ -3046,7 +3119,7 @@ export default function QuranApp() {
                         </button>
                         <button
                           onClick={handlePlayPause}
-                          className={`p-3 rounded-full ${t.accentBg} text-white shadow-md`}
+                          className={`p-3.5 rounded-full ${t.accentBg} text-white shadow-[0_6px_16px_rgba(63,85,68,0.35)]`}
                           aria-label={isPlaying ? 'Pause' : 'Play'}
                         >
                           {isPlaying ? <Pause size={18} /> : <Play size={18} />}
@@ -3103,11 +3176,11 @@ export default function QuranApp() {
         />
       ) : section === 'duas' ? (
         <DuasSection t={t} isDark={isDark} />
-      ) : section === 'Ibadah' ? (
-        <IbadahSection
+      ) : section === 'worship' ? (
+        <WorshipSection
           t={t}
-          tab={IbadahTab}
-          setTab={setIbadahTab}
+          tab={worshipTab}
+          setTab={setWorshipTab}
           location={prayerLocation}
           extraRem={extraRem}
           setExtra={setExtra}
@@ -3124,9 +3197,9 @@ export default function QuranApp() {
           khatmahStats={khatmahStats}
           translationLang={translationLang}
           onOpenAyah={(surahNum, ayahNum) => selectSurah(surahNum, ayahNum)}
-          openIbadah={(tab) => {
-            setIbadahTab(tab);
-            setSection('Ibadah');
+          openWorship={(tab) => {
+            setWorshipTab(tab);
+            setSection('worship');
           }}
         />
       ) : (
@@ -3192,11 +3265,11 @@ export default function QuranApp() {
               section === 'quran' && ayahs.length > 0 ? '0px' : 'max(0.75rem, env(safe-area-inset-bottom))',
           }}
         >
-          <div className={`pointer-events-auto relative max-w-md mx-auto flex items-center justify-around rounded-full p-1.5 ${t.glassPanel}`}>
+          <div className={`pointer-events-auto relative max-w-md mx-auto flex items-center justify-around rounded-[28px] p-1.5 ${t.glassPanel}`}>
             {[
               { key: 'quran', label: "Qur'an", icon: BookOpen },
               { key: 'prayer', label: 'Prayer', icon: Clock },
-              { key: 'Ibadah', label: 'Ibadah', icon: Heart },
+              { key: 'worship', label: 'Ibadah', icon: Heart },
               { key: 'duas', label: 'Duas', icon: Sparkles },
             ].map(({ key, label, icon: Icon }) => (
               <button
@@ -3205,8 +3278,8 @@ export default function QuranApp() {
                   setSection(key);
                   setMobileMore(false);
                 }}
-                className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-full transition ${
-                  section === key ? `${t.accentBg} text-white` : t.textMuted
+                className={`flex flex-col items-center gap-0.5 px-3.5 py-1.5 rounded-2xl transition ${
+                  section === key ? `${t.pillPressed} font-semibold` : t.textMuted
                 }`}
                 aria-label={label}
               >
@@ -3216,8 +3289,8 @@ export default function QuranApp() {
             ))}
             <button
               onClick={() => setMobileMore((v) => !v)}
-              className={`flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-full transition ${
-                ['hijri', 'progress', 'learn'].includes(section) ? `${t.accentBg} text-white` : t.textMuted
+              className={`flex flex-col items-center gap-0.5 px-3.5 py-1.5 rounded-2xl transition ${
+                ['hijri', 'progress', 'learn'].includes(section) ? `${t.pillPressed} font-semibold` : t.textMuted
               }`}
               aria-label="More sections"
               aria-expanded={mobileMore}
@@ -3605,7 +3678,7 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
               placeholder="Country"
               className={`flex-1 min-w-[120px] px-3 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
             />
-            <button type="submit" className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+            <button type="submit" className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
               Search
             </button>
           </form>
@@ -3779,8 +3852,8 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                     E
                   </text>
                   <g transform={`rotate(${qibla} 100 100)`}>
-                    <line x1="100" y1="100" x2="100" y2="25" stroke="#66806B" strokeWidth="4" strokeLinecap="round" />
-                    <polygon points="100,15 92,32 108,32" fill="#66806B" />
+                    <line x1="100" y1="100" x2="100" y2="25" stroke="#667C68" strokeWidth="4" strokeLinecap="round" />
+                    <polygon points="100,15 92,32 108,32" fill="#667C68" />
                   </g>
                   <circle cx="100" cy="100" r="5" fill={isDark ? '#F3F1EA' : '#2B2A27'} />
                 </svg>
@@ -3817,7 +3890,7 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
                   </p>
                   <button
                     onClick={() => setCompassFlip((v) => !v)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${
+                    className={`text-xs px-3 py-1.5 rounded-lg ${t.btn} ${
                       compassFlip ? t.accent : ''
                     }`}
                   >
@@ -3972,10 +4045,10 @@ const KHATMAH_PRESETS = [
   { label: '1 year', days: 365 },
 ];
 
-function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah, openIbadah }) {
+function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, translationLang, onOpenAyah, openWorship }) {
   const [customDate, setCustomDate] = useState('');
-  // Ibadah summary, read from what the Ibadah tab saved on this device.
-  const Ibadah = useMemo(() => {
+  // Worship summary, read from what the Worship tab saved on this device.
+  const worship = useMemo(() => {
     const today = dateKey();
     const pl = { log: {}, extra: {}, madeUp: {}, ...loadJSON(LS_PRAYER_LOG, {}) };
     const ad = loadJSON(LS_ADHKAR, {});
@@ -4059,37 +4132,37 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
         </div>
       </div>
 
-      {/* Prayer & Ibadah summary */}
+      {/* Prayer & worship summary */}
       <div className={`rounded-3xl border px-4 py-4 ${t.cardBg}`}>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Prayer & Ibadah</h2>
-          <button onClick={() => openIbadah('prayers')} className={`text-xs ${t.accent} hover:underline`}>
+          <h2 className="text-sm font-semibold">Prayer & worship</h2>
+          <button onClick={() => openWorship('prayers')} className={`text-xs ${t.accent} hover:underline`}>
             Open tracker
           </button>
         </div>
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <div className="text-xl font-semibold">{Ibadah.prayedToday}/5</div>
+            <div className="text-xl font-semibold">{worship.prayedToday}/5</div>
             <div className={`text-[11px] ${t.textMuted}`}>Prayed today</div>
           </div>
           <div>
-            <div className={`text-xl font-semibold ${t.accent}`}>{Ibadah.streak}</div>
-            <div className={`text-[11px] ${t.textMuted}`}>Prayer streak (best {Ibadah.best})</div>
+            <div className={`text-xl font-semibold ${t.accent}`}>{worship.streak}</div>
+            <div className={`text-[11px] ${t.textMuted}`}>Prayer streak (best {worship.best})</div>
           </div>
           <div>
-            <div className={`text-xl font-semibold ${Ibadah.qada ? 'text-amber-500' : ''}`}>{Ibadah.qada}</div>
+            <div className={`text-xl font-semibold ${worship.qada ? 'text-amber-500' : ''}`}>{worship.qada}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Qada owed</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{Ibadah.morning}</div>
+            <div className="text-xl font-semibold">{worship.morning}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Morning adhkar streak</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{Ibadah.evening}</div>
+            <div className="text-xl font-semibold">{worship.evening}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Evening adhkar streak</div>
           </div>
           <div>
-            <div className="text-xl font-semibold">{Ibadah.dhikr.toLocaleString()}</div>
+            <div className="text-xl font-semibold">{worship.dhikr.toLocaleString()}</div>
             <div className={`text-[11px] ${t.textMuted}`}>Dhikr today</div>
           </div>
         </div>
@@ -4132,7 +4205,7 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
                 <button
                   key={p.label}
                   onClick={() => startPlan(p.days)}
-                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                  className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
                 >
                   {p.label}
                 </button>
@@ -4162,7 +4235,7 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
                 </p>
                 <button
                   onClick={() => setKhatmah(null)}
-                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                  className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
                 >
                   Start a new plan
                 </button>
@@ -4205,7 +4278,7 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
                 </div>
                 <button
                   onClick={() => setKhatmah(null)}
-                  className={`w-full text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                  className={`w-full text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
                 >
                   Cancel plan
                 </button>
@@ -4245,7 +4318,7 @@ function ProgressSection({ t, readingStats, khatmah, setKhatmah, khatmahStats, t
               </span>
               <button
                 onClick={() => onOpenAyah(ayahOfDay.surahNumber, ayahOfDay.numberInSurah)}
-                className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
               >
                 Read in context
               </button>
@@ -4332,31 +4405,28 @@ function VerseActionsSheet({ ayah, idx, surahMeta, isBookmarked, note, t, onClos
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div
-        className={`relative w-full sm:w-96 rounded-t-3xl sm:rounded-3xl ${t.glassPanel} p-2`}
-        style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
-      >
-        <div className="flex items-center justify-between px-4 py-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-5">
+      <div className="absolute inset-0 bg-[#232A24]/35 backdrop-blur-sm backdrop-enter" onClick={onClose} />
+      <div className={`relative w-full max-w-sm rounded-[28px] overflow-hidden sheet-enter ${t.sheetBg}`}>
+        <div className="flex items-center justify-between px-5 pt-4 pb-2">
           <div className="min-w-0">
             <h3 className={`text-sm font-semibold ${t.text}`}>Verse Actions</h3>
             <p className={`text-xs ${t.textMuted} truncate`}>
               {surahMeta?.englishName} · Ayah {ayah.numberInSurah}
             </p>
           </div>
-          <button onClick={onClose} className={`p-2 rounded-full shrink-0 ${t.hoverSoft} ${t.textMuted}`} aria-label="Close">
+          <button onClick={onClose} className={`p-2 rounded-full shrink-0 ${t.iconBtn} ${t.textMuted}`} aria-label="Close">
             <X size={16} />
           </button>
         </div>
-        <div className="px-2 pb-2 space-y-1">
+        <div className="px-3">
           {actions.map(({ icon: Icon, label, onClick }) => (
             <button
               key={label}
               onClick={onClick}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-3xl text-sm text-left transition ${t.hoverSoft} ${t.text}`}
+              className={`w-full flex items-center gap-3 px-2 py-3.5 text-sm text-left border-b last:border-b-0 transition ${t.divider} ${t.hoverSoft} ${t.text}`}
             >
-              <span className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${t.accent} bg-current/10`}>
+              <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${t.iconBtn} ${t.accent}`}>
                 <Icon size={16} />
               </span>
               {label}
@@ -4365,7 +4435,7 @@ function VerseActionsSheet({ ayah, idx, surahMeta, isBookmarked, note, t, onClos
         </div>
         <button
           onClick={onClose}
-          className={`w-full text-center text-sm font-medium py-3 mt-1 rounded-3xl transition ${t.hoverSoft} ${t.textMuted}`}
+          className={`mx-4 mb-4 mt-2 w-[calc(100%-2rem)] text-center text-sm font-medium py-3 rounded-full transition ${t.iconBtn} ${t.text}`}
         >
           Cancel
         </button>
@@ -4723,7 +4793,7 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
             <div className={`flex items-center gap-1 rounded-lg border ${t.divider} p-1`}>
               <button
                 onClick={() => setQuizPool('letters')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
                   quizPool === 'letters' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
                 }`}
               >
@@ -4731,7 +4801,7 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
               </button>
               <button
                 onClick={() => setQuizPool('harakat')}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
                   quizPool === 'harakat' ? `${t.accentBg} text-white` : `${t.textMuted} ${t.hoverSoft}`
                 }`}
               >
@@ -4783,7 +4853,7 @@ function LearnSection({ t, beginnerMode, setBeginnerMode }) {
   );
 }
 
-/* ==================== Ibadah helpers (pure logic) ==================== */
+/* ==================== Worship helpers (pure logic) ==================== */
 
 const FIVE_PRAYERS = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
 
@@ -4912,7 +4982,7 @@ function fmtCountdown(sec) {
   return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
 }
 
-/* ==================== Ibadah hub: Tasbih, Adhkar, Prayer tracker, Ramadan, Offline ==================== */
+/* ==================== Worship hub: Tasbih, Adhkar, Prayer tracker, Ramadan, Offline ==================== */
 
 const LS_TASBIH = 'quran_reader_tasbih_v1';
 const LS_ADHKAR = 'quran_reader_adhkar_v1';
@@ -5197,13 +5267,13 @@ function TasbihPanel({ t }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+      <div className="flex gap-2 overflow-x-auto pt-2 pb-4 -mx-3 px-3">
         {TASBIH_PRESETS.map((p) => (
           <button
             key={p.id}
             onClick={() => choosePreset(p)}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-              st.preset === p.id && !st.guided ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+              st.preset === p.id && !st.guided ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
             }`}
           >
             {p.translit}
@@ -5225,13 +5295,13 @@ function TasbihPanel({ t }) {
         <button
           onClick={tap}
           disabled={finished}
-          className="relative w-56 h-56 rounded-full select-none active:scale-[0.98] transition-transform touch-manipulation"
+          className={`relative w-56 h-56 rounded-full select-none touch-manipulation ${t.btnLg}`}
           aria-label={`Count ${preset.translit}`}
         >
           <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full -rotate-90">
             <circle cx="100" cy="100" r={R} fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="8" />
             <circle
-              cx="100" cy="100" r={R} fill="none" stroke="#66806B" strokeWidth="8" strokeLinecap="round"
+              cx="100" cy="100" r={R} fill="none" stroke="#667C68" strokeWidth="8" strokeLinecap="round"
               strokeDasharray={C} strokeDashoffset={C * (1 - progress)}
               style={{ transition: 'stroke-dashoffset 0.15s ease-out' }}
             />
@@ -5258,18 +5328,18 @@ function TasbihPanel({ t }) {
         )}
 
         <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-          <button onClick={undo} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+          <button onClick={undo} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
             Undo
           </button>
           <button
             onClick={() => setSaved({ ...st, count: 0 })}
-            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+            className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
           >
             Reset
           </button>
           <button
             onClick={() => setSaved({ ...st, vibrate: !st.vibrate })}
-            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${st.vibrate ? t.accent : t.textFaint}`}
+            className={`text-xs px-3 py-1.5 rounded-lg ${t.btn} ${st.vibrate ? t.accent : t.textFaint}`}
           >
             Vibration {st.vibrate ? 'on' : 'off'}
           </button>
@@ -5279,11 +5349,11 @@ function TasbihPanel({ t }) {
               setSaved({ ...st, sound: next });
               if (next) playTick(); // also unlocks audio on iPhone, which needs a tap first
             }}
-            className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} ${st.sound ? t.accent : t.textFaint}`}
+            className={`text-xs px-3 py-1.5 rounded-lg ${t.btn} ${st.sound ? t.accent : t.textFaint}`}
           >
             Sound {st.sound ? 'on' : 'off'}
           </button>
-          <button onClick={testVibration} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+          <button onClick={testVibration} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
             Test vibration
           </button>
         </div>
@@ -5308,7 +5378,7 @@ function TasbihPanel({ t }) {
                     setTarget(n);
                   }}
                   className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                    st.target === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                    st.target === n ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
                   }`}
                 >
                   {n === 0 ? '∞' : n}
@@ -5317,7 +5387,7 @@ function TasbihPanel({ t }) {
               <button
                 onClick={() => setCustomOpen(true)}
                 className={`px-2.5 py-1 rounded-full text-[11px] border ${
-                  isCustom || customOpen ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                  isCustom || customOpen ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
                 }`}
               >
                 Custom{isCustom ? ` (${st.target})` : ''}
@@ -5359,7 +5429,7 @@ function TasbihPanel({ t }) {
           </div>
           <button
             onClick={st.guided ? stopGuided : startGuided}
-            className={`shrink-0 text-xs px-3 py-1.5 rounded-lg ${st.guided ? `border ${t.divider} ${t.hoverSoft}` : `${t.accentBg} text-white`}`}
+            className={`shrink-0 text-xs px-3 py-1.5 rounded-lg ${st.guided ? `${t.btn}` : `${t.accentBg} text-white`}`}
           >
             {st.guided ? 'Stop' : 'Start'}
           </button>
@@ -5390,11 +5460,11 @@ const ADHKAR = [
   { id: 'asbahna', sessions: ['morning'], count: 1, source: 'Sahih Muslim.',
     arabic: 'أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذَا الْيَوْمِ وَخَيْرَ مَا بَعْدَهُ، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذَا الْيَوْمِ وَشَرِّ مَا بَعْدَهُ، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
     translit: "Asbahna wa asbahal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhal-yawmi wa khayra ma ba'dah, wa a'udhu bika min sharri ma fi hadhal-yawmi wa sharri ma ba'dah. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
-    translation: 'We have reached the morning and the dominion belongs to Allah, and all praise is for Allah. None has the right to be Ibadahped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this day and the good of what follows it, and I seek refuge in You from the evil of this day and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+    translation: 'We have reached the morning and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this day and the good of what follows it, and I seek refuge in You from the evil of this day and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
   { id: 'amsayna', sessions: ['evening'], count: 1, source: 'Sahih Muslim.',
     arabic: 'أَمْسَيْنَا وَأَمْسَى الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، رَبِّ أَسْأَلُكَ خَيْرَ مَا فِي هَذِهِ اللَّيْلَةِ وَخَيْرَ مَا بَعْدَهَا، وَأَعُوذُ بِكَ مِنْ شَرِّ مَا فِي هَذِهِ اللَّيْلَةِ وَشَرِّ مَا بَعْدَهَا، رَبِّ أَعُوذُ بِكَ مِنَ الْكَسَلِ وَسُوءِ الْكِبَرِ، رَبِّ أَعُوذُ بِكَ مِنْ عَذَابٍ فِي النَّارِ وَعَذَابٍ فِي الْقَبْرِ',
     translit: "Amsayna wa amsal-mulku lillah, walhamdu lillah, la ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamdu wa huwa 'ala kulli shay'in qadir. Rabbi as'aluka khayra ma fi hadhihil-laylah wa khayra ma ba'daha, wa a'udhu bika min sharri ma fi hadhihil-laylah wa sharri ma ba'daha. Rabbi a'udhu bika minal-kasali wa su'il-kibar. Rabbi a'udhu bika min 'adhabin fin-nari wa 'adhabin fil-qabr.",
-    translation: 'We have reached the evening and the dominion belongs to Allah, and all praise is for Allah. None has the right to be Ibadahped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this night and the good of what follows it, and I seek refuge in You from the evil of this night and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
+    translation: 'We have reached the evening and the dominion belongs to Allah, and all praise is for Allah. None has the right to be worshipped but Allah alone, with no partner; His is the dominion and the praise, and He is able to do all things. My Lord, I ask You for the good of this night and the good of what follows it, and I seek refuge in You from the evil of this night and the evil of what follows it. My Lord, I seek refuge in You from laziness and the misery of old age. My Lord, I seek refuge in You from punishment in the Fire and punishment in the grave.' },
   { id: 'bika-asbahna', sessions: ['morning'], count: 1, source: 'at-Tirmidhi.',
     arabic: 'اللَّهُمَّ بِكَ أَصْبَحْنَا، وَبِكَ أَمْسَيْنَا، وَبِكَ نَحْيَا، وَبِكَ نَمُوتُ، وَإِلَيْكَ النُّشُورُ',
     translit: "Allahumma bika asbahna, wa bika amsayna, wa bika nahya, wa bika namutu, wa ilaykan-nushur",
@@ -5416,7 +5486,7 @@ const ADHKAR = [
   { id: 'tahlil-10', sessions: ['morning', 'evening'], count: 10, source: 'Reported by Abu Dawud and an-Nasa\'i for ten times; saying it 100 times in a day is reported in Bukhari and Muslim.',
     arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ',
     translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir",
-    translation: 'None has the right to be Ibadahped but Allah alone, with no partner. His is the dominion and His is the praise, and He is able to do all things.' },
+    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and His is the praise, and He is able to do all things.' },
   { id: 'subhanallah-bihamdihi', sessions: ['morning', 'evening'], count: 100, source: 'Sahih Muslim: whoever says it 100 times morning and evening.',
     arabic: 'سُبْحَانَ اللَّهِ وَبِحَمْدِهِ',
     translit: 'Subhanallahi wa bihamdih',
@@ -5444,11 +5514,11 @@ const ADHKAR = [
   { id: 'la-mani', sessions: ['after'], count: 1, source: 'Sahih al-Bukhari and Sahih Muslim.',
     arabic: 'لَا إِلَٰهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ وَهُوَ عَلَىٰ كُلِّ شَيْءٍ قَدِيرٌ، اللَّهُمَّ لَا مَانِعَ لِمَا أَعْطَيْتَ، وَلَا مُعْطِيَ لِمَا مَنَعْتَ، وَلَا يَنْفَعُ ذَا الْجَدِّ مِنْكَ الْجَدُّ',
     translit: "La ilaha illallahu wahdahu la sharika lah, lahul-mulku wa lahul-hamd, wa huwa 'ala kulli shay'in qadir. Allahumma la mani'a lima a'tayta, wa la mu'tiya lima mana'ta, wa la yanfa'u dhal-jaddi minkal-jadd",
-    translation: 'None has the right to be Ibadahped but Allah alone, with no partner. His is the dominion and the praise, and He is able to do all things. O Allah, none can withhold what You give, none can give what You withhold, and the might of the mighty cannot benefit them against You.' },
+    translation: 'None has the right to be worshipped but Allah alone, with no partner. His is the dominion and the praise, and He is able to do all things. O Allah, none can withhold what You give, none can give what You withhold, and the might of the mighty cannot benefit them against You.' },
   { id: 'a-inni', sessions: ['after'], count: 1, source: "Abu Dawud, an-Nasa'i: the Prophet ﷺ told Mu'adh to say it after every prayer.",
     arabic: 'اللَّهُمَّ أَعِنِّي عَلَىٰ ذِكْرِكَ وَشُكْرِكَ وَحُسْنِ عِبَادَتِكَ',
     translit: "Allahumma a'inni 'ala dhikrika wa shukrika wa husni 'ibadatik",
-    translation: 'O Allah, help me to remember You, to thank You, and to Ibadah You well.' },
+    translation: 'O Allah, help me to remember You, to thank You, and to worship You well.' },
 ];
 const ADHKAR_SESSIONS = [
   { key: 'morning', label: 'Morning', hint: 'After Fajr until sunrise is best; valid until Dhuhr' },
@@ -5492,7 +5562,7 @@ function AdhkarPanel({ t }) {
 
   return (
     <div className="space-y-4">
-      <div className={`inline-flex rounded-full border p-0.5 ${t.divider}`}>
+      <div className={`inline-flex rounded-full p-0.5 ${t.pillTrack}`}>
         {ADHKAR_SESSIONS.map((s) => (
           <button
             key={s.key}
@@ -5576,7 +5646,7 @@ function AdhkarPanel({ t }) {
       })}
 
       <div className="flex justify-center">
-        <button onClick={resetSession} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+        <button onClick={resetSession} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
           Reset this list
         </button>
       </div>
@@ -5599,8 +5669,8 @@ function SwitchRow({ t, label, hint, on, onChange }) {
         <span className="block text-sm">{label}</span>
         {hint && <span className={`block text-xs mt-0.5 leading-snug ${t.textMuted}`}>{hint}</span>}
       </span>
-      <span className={`shrink-0 w-10 h-6 rounded-full relative transition ${on ? t.accentBg : 'bg-gray-400/40'}`}>
-        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      <span className={`shrink-0 w-11 h-6 rounded-full relative transition ${on ? t.accentBg : t.pillTrack}`}>
+        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-[1px_2px_4px_rgba(0,0,0,0.3)] transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
       </span>
     </button>
   );
@@ -5733,7 +5803,7 @@ function PrayerTrackerPanel({ t }) {
         </div>
         <div className="flex items-center justify-between mt-3">
           <p className={`text-[11px] ${t.textFaint}`}>Tap once for prayed, twice for missed, three times to clear.</p>
-          <button onClick={markAll} className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+          <button onClick={markAll} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
             All prayed
           </button>
         </div>
@@ -5779,13 +5849,13 @@ function PrayerTrackerPanel({ t }) {
                 <button
                   onClick={() => addMadeUp(p.key)}
                   disabled={!pending[p.key]}
-                  className={`text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft} disabled:opacity-30`}
+                  className={`text-xs px-3 py-1.5 rounded-lg ${t.btn} disabled:opacity-30`}
                 >
                   Made up
                 </button>
                 <button
                   onClick={() => addOwed(p.key)}
-                  className={`text-xs w-8 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                  className={`text-xs w-8 py-1.5 rounded-lg ${t.btn}`}
                   aria-label={`Add one owed ${p.key}`}
                 >
                   +
@@ -5990,7 +6060,7 @@ function RamadanPanel({ t, location, extraRem, setExtra }) {
             <button
               disabled={!qadaPending}
               onClick={() => setFastSaved({ ...F, madeUp: F.madeUp + 1 })}
-              className={`text-xs px-3 py-2 rounded-lg border ${t.divider} ${t.hoverSoft} disabled:opacity-30`}
+              className={`text-xs px-3 py-2 rounded-lg ${t.btn} disabled:opacity-30`}
             >
               I made up one fast
             </button>
@@ -6008,7 +6078,7 @@ function RamadanPanel({ t, location, extraRem, setExtra }) {
               key={n}
               onClick={() => setTwSaved({ ...TW, rakaat: n })}
               className={`px-3 py-1 rounded-full text-xs border ${
-                TW.rakaat === n ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                TW.rakaat === n ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
               }`}
             >
               {n}
@@ -6278,14 +6348,14 @@ function OfflinePanel({ t, installPrompt, onInstall, installed, ayahs, surahMeta
           <button
             onClick={saveText}
             disabled={busy}
-            className={`w-full text-sm px-4 py-2.5 rounded-xl border ${t.divider} ${t.hoverSoft} disabled:opacity-50`}
+            className={`w-full text-sm px-4 py-2.5 rounded-xl ${t.btn} disabled:opacity-50`}
           >
             Save the whole Qur'an text for offline
           </button>
           <button
             onClick={saveAudio}
             disabled={busy || !ayahs.length}
-            className={`w-full text-sm px-4 py-2.5 rounded-xl border ${t.divider} ${t.hoverSoft} disabled:opacity-50`}
+            className={`w-full text-sm px-4 py-2.5 rounded-xl ${t.btn} disabled:opacity-50`}
           >
             {ayahs.length && surahMeta
               ? `Save audio of ${surahMeta.englishName} (${ayahs.length} ayahs)`
@@ -6330,7 +6400,7 @@ function OfflinePanel({ t, installPrompt, onInstall, installed, ayahs, surahMeta
               {usage.api} saved text pages · {usage.audio} saved audio files · app total {formatBytes(usage.used)}
               {usage.quota ? ` of ${formatBytes(usage.quota)} available` : ''}
             </p>
-            <button onClick={clearAll} className={`mt-3 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}>
+            <button onClick={clearAll} className={`mt-3 text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
               Clear saved Qur'an text and audio
             </button>
           </>
@@ -6345,9 +6415,9 @@ function OfflinePanel({ t, installPrompt, onInstall, installed, ayahs, surahMeta
   );
 }
 
-/* ---------------- Ibadah hub ---------------- */
+/* ---------------- Worship hub ---------------- */
 
-const Ibadah_TABS = [
+const WORSHIP_TABS = [
   { key: 'tasbih', label: 'Tasbih' },
   { key: 'adhkar', label: 'Adhkar' },
   { key: 'prayers', label: 'Prayers' },
@@ -6355,16 +6425,16 @@ const Ibadah_TABS = [
   { key: 'app', label: 'App' },
 ];
 
-function IbadahSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
+function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
   return (
     <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16">
-      <div className="flex gap-1.5 overflow-x-auto pb-3 mb-3 -mx-1 px-1">
-        {Ibadah_TABS.map((x) => (
+      <div className="flex gap-2 overflow-x-auto pt-2 pb-5 mb-1 -mx-3 px-3">
+        {WORSHIP_TABS.map((x) => (
           <button
             key={x.key}
             onClick={() => setTab(x.key)}
             className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border transition ${
-              tab === x.key ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+              tab === x.key ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
             }`}
           >
             {x.label}
@@ -6491,7 +6561,7 @@ function DuaAudioButton({ dua, t, onMessage }) {
   return (
     <button
       onClick={play}
-      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+      className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
       aria-label={status === 'playing' ? 'Stop dua audio' : 'Play dua audio'}
     >
       {status === 'playing' ? <Pause size={13} /> : <Volume2 size={13} />}
@@ -6558,7 +6628,7 @@ function toArabicDigits(n) {
   return String(n).replace(/\d/g, (c) => '٠١٢٣٤٥٦٧٨٩'[c]);
 }
 
-// kind: 'major' = holiday / key date, 'minor' = recommended-Ibadah day
+// kind: 'major' = holiday / key date, 'minor' = recommended-worship day
 function hijriEventsFor(m, d) {
   const ev = [];
   if (m === 1 && d === 1) ev.push({ label: 'Islamic New Year', kind: 'major' });
@@ -6752,7 +6822,7 @@ function HijriCalendarSection({ t, isDark }) {
               setMonthStart(firstOfHijriMonth(new Date(), adjust));
               setSelected(null);
             }}
-            className={`text-xs px-3 py-1.5 rounded-full border ${t.divider} ${t.hoverSoft}`}
+            className={`text-xs px-3 py-1.5 rounded-full ${t.btn}`}
           >
             Jump to today
           </button>
@@ -6938,12 +7008,12 @@ function DuasSection({ t, isDark }) {
       </div>
 
       <div className="relative mb-4">
-        <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${t.textFaint}`} />
+        <Search size={16} className={`absolute left-3.5 top-1/2 -translate-y-1/2 z-10 pointer-events-none ${t.textFaint}`} />
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by occasion or keyword…"
-          className={`w-full pl-9 pr-3 py-2.5 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+          className={`w-full pl-10 pr-3 py-2.5 rounded-2xl border text-sm outline-none focus:ring-2 focus:ring-[#667C68]/40 ${t.inputBg}`}
         />
       </div>
 
@@ -6951,7 +7021,7 @@ function DuasSection({ t, isDark }) {
         <button
           onClick={() => setActiveCategory('all')}
           className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-            activeCategory === 'all' ? `${t.accentBg} text-white border-transparent` : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+            activeCategory === 'all' ? `${t.accentBg} text-white border-transparent` : `${t.btn} ${t.textMuted}`
           }`}
         >
           All
@@ -6965,7 +7035,7 @@ function DuasSection({ t, isDark }) {
               className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
                 activeCategory === c.key
                   ? `${t.accentBg} text-white border-transparent`
-                  : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+                  : `${t.btn} ${t.textMuted}`
               }`}
             >
               <Icon size={12} />
@@ -6976,7 +7046,7 @@ function DuasSection({ t, isDark }) {
         <button
           onClick={() => setShowFavoritesOnly((v) => !v)}
           className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-            showFavoritesOnly ? 'bg-amber-500 text-white border-transparent' : `${t.divider} ${t.textMuted} ${t.hoverSoft}`
+            showFavoritesOnly ? 'bg-amber-500 text-white border-transparent' : `${t.btn} ${t.textMuted}`
           }`}
         >
           <Star size={12} fill={showFavoritesOnly ? 'currentColor' : 'none'} />
@@ -7037,7 +7107,7 @@ function DuasSection({ t, isDark }) {
                       <DuaAudioButton dua={dua} t={t} onMessage={(text) => setAudioMsg({ id: dua.id, text })} />
                       <button
                         onClick={() => copyDua(dua)}
-                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border ${t.divider} ${t.hoverSoft}`}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
                       >
                         {copiedId === dua.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
                         {copiedId === dua.id ? 'Copied' : 'Copy'}
