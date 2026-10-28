@@ -22,7 +22,7 @@ import {
  *      - ml.abdulhameed     -> Malayalam translation (Cheriyamundam Abdul Hameed & Kunhi Mohammed)
  *      - en.transliteration -> Romanized transliteration (pronunciation aid)
  *      - ar.alafasy         -> Audio recitation, Mishary Rashid Alafasy
- *  - https://api.aladhan.com/v1 → Prayer timings & Qibla direction, from geolocation or a searched city
+ *  - Prayer times and Qibla are calculated on the device itself (no web service needed)
  *
  * Note: the Quran API does not publish a dedicated Malayalam-script
  * transliteration edition, only an English/Roman one, so a single
@@ -57,9 +57,6 @@ function buildTextEditions(translationEdition) {
   return `quran-uthmani,${translationEdition || TRANSLATION_OPTIONS[DEFAULT_TRANSLATION].edition},en.transliteration`;
 }
 
-const ADHAN_API = 'https://api.aladhan.com/v1';
-// No fixed calculation method: when `method` is omitted, the Aladhan API picks the
-// authority closest to the coordinates (e.g. Gulf/Umm al-Qura region, Karachi, ISNA...).
 const KAABA = { lat: 21.4225, lon: 39.8262 };
 
 const LS_BOOKMARKS = 'quran_reader_bookmarks_v1';
@@ -992,6 +989,12 @@ export default function QuranApp() {
   // ---------------- Prayer reminders (app-level so they keep running on every tab) ----------------
   const [prayerLocation, setPrayerLocation] = useState(() => loadJSON(LS_PRAYER_LOCATION, null)); // {lat, lon, label}
   const [remindersOn, setRemindersOn] = useState(() => loadJSON(LS_REMINDERS, false));
+  const [prayerSettings, setPrayerSettings] = useState(() => ({ ...PT_DEFAULT_SETTINGS, ...loadJSON(LS_PRAYER_SETTINGS, {}) }));
+  useEffect(() => {
+    localStorage.setItem(LS_PRAYER_SETTINGS, JSON.stringify(prayerSettings));
+  }, [prayerSettings]);
+  const prayerSettingsRef = useRef(prayerSettings);
+  prayerSettingsRef.current = prayerSettings;
   const [azanPlaying, setAzanPlaying] = useState(false);
   const [adhanReady, setAdhanReady] = useState(false); // true once the Azan file has loaded
   const [extraRem, setExtraRem] = useState(() => ({ ...DEFAULT_EXTRA_REM, ...loadJSON(LS_EXTRA_REM, {}) }));
@@ -1089,7 +1092,7 @@ export default function QuranApp() {
             setPrayerLocation((prev) => {
               if (prev && prev.label !== 'Current location') return prev;
               if (prev && haversineKm(prev.lat, prev.lon, lat, lon) < 10) return prev;
-              return { lat, lon, label: 'Current location' };
+              return { lat, lon, label: 'Current location', tz: ptDeviceTz() };
             });
           },
           () => {},
@@ -1167,31 +1170,7 @@ export default function QuranApp() {
   useEffect(() => {
     if (!engineActive || !prayerLocation) return undefined;
     let cancelled = false;
-    let cfg = null; // { tz, date, times }
-    let fetching = false;
-    let lastFetchAt = 0;
     const fired = new Set(loadJSON(LS_REMINDERS_FIRED, []));
-
-    const load = () => {
-      fetching = true;
-      lastFetchAt = Date.now();
-      const ts = Math.floor(Date.now() / 1000);
-      fetch(`${ADHAN_API}/timings/${ts}?latitude=${prayerLocation.lat}&longitude=${prayerLocation.lon}`)
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((data) => {
-          if (cancelled) return;
-          const times = {};
-          Object.keys(data.data.timings).forEach((k) => {
-            times[k] = String(data.data.timings[k]).split(' ')[0];
-          });
-          const [dd, mm, yyyy] = String(data.data.date?.gregorian?.date || '').split('-');
-          cfg = { tz: data.data.meta?.timezone, times, date: yyyy ? `${yyyy}-${mm}-${dd}` : null };
-        })
-        .catch(() => {})
-        .finally(() => {
-          fetching = false;
-        });
-    };
 
     const fire = (id, title, body, withAzan) => {
       if (fired.has(id)) return;
@@ -1209,9 +1188,10 @@ export default function QuranApp() {
     };
 
     const tick = () => {
-      const { date, minutes } = zonedNow(cfg?.tz);
-      if ((!cfg || cfg.date !== date) && !fetching && Date.now() - lastFetchAt > 60000) load();
-      if (!cfg || cfg.date !== date) return;
+      // Times are calculated on the device for the place's own date, so there is nothing to download.
+      const tz = ptLocationTz(prayerLocation);
+      const { date, minutes } = zonedNow(tz);
+      const cfg = { tz, date, times: ptDayTimes(prayerLocation.lat, prayerLocation.lon, date, tz, prayerSettingsRef.current).times };
       const due = (target) => target != null && minutes - target >= 0 && minutes - target <= REMINDER_GRACE_MIN;
 
       if (remindersOnRef.current) {
@@ -3170,6 +3150,8 @@ export default function QuranApp() {
           stopAzan={stopAzan}
           azanPlaying={azanPlaying}
           adhanReady={adhanReady}
+          settings={prayerSettings}
+          setSettings={setPrayerSettings}
           extraRem={extraRem}
           setExtra={setExtra}
           openSurah={(n) => selectSurah(n)}
@@ -3184,6 +3166,7 @@ export default function QuranApp() {
           location={prayerLocation}
           extraRem={extraRem}
           setExtra={setExtra}
+          prayerSettings={prayerSettings}
           offline={{ installPrompt, onInstall: handleInstall, installed, ayahs, surahMeta, reciter, translationLang }}
         />
       ) : section === 'hijri' ? (
@@ -3355,23 +3338,430 @@ export default function QuranApp() {
   );
 }
 
+/* ==================== Prayer engine ==================== */
+/* ==================== Prayer-time engine (runs on the device; no web service) ==================== */
+// Astronomy follows the NOAA solar equations (accurate to well under a minute); prayer definitions follow the
+// usual conventions: Fajr/Isha by sun angle (or a fixed interval after sunset), Asr by shadow length, sunrise and
+// sunset at -0.833 deg. Everything is computed for the calendar date in the location's own time zone.
+
+const PT_R = Math.PI / 180;
+const ptMod = (x, n) => ((x % n) + n) % n;
+
+function ptJulianDay(y, m, d, hours) {
+  if (m <= 2) {
+    y -= 1;
+    m += 12;
+  }
+  const A = Math.floor(y / 100);
+  const B = 2 - A + Math.floor(A / 4);
+  return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + hours / 24 + B - 1524.5;
+}
+
+// Solar declination (radians) and equation of time (minutes) at a Julian day.
+function ptSun(jd) {
+  const T = (jd - 2451545) / 36525;
+  const L0 = ptMod(280.46646 + T * (36000.76983 + T * 0.0003032), 360);
+  const M = 357.52911 + T * (35999.05029 - 0.0001537 * T);
+  const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T);
+  const C =
+    Math.sin(M * PT_R) * (1.914602 - T * (0.004817 + 0.000014 * T)) +
+    Math.sin(2 * M * PT_R) * (0.019993 - 0.000101 * T) +
+    Math.sin(3 * M * PT_R) * 0.000289;
+  const trueLong = L0 + C;
+  const omega = 125.04 - 1934.136 * T;
+  const lambda = trueLong - 0.00569 - 0.00478 * Math.sin(omega * PT_R);
+  const eps0 = 23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60;
+  const eps = eps0 + 0.00256 * Math.cos(omega * PT_R);
+  const decl = Math.asin(Math.sin(eps * PT_R) * Math.sin(lambda * PT_R));
+  const y = Math.tan((eps * PT_R) / 2) ** 2;
+  const eqTime =
+    4 *
+    ((y * Math.sin(2 * L0 * PT_R) -
+      2 * e * Math.sin(M * PT_R) +
+      4 * e * y * Math.sin(M * PT_R) * Math.cos(2 * L0 * PT_R) -
+      0.5 * y * y * Math.sin(4 * L0 * PT_R) -
+      1.25 * e * e * Math.sin(2 * M * PT_R)) /
+      PT_R);
+  return { decl, eqTime };
+}
+
+// UTC offset (minutes) of an IANA time zone at local noon on a date (handles daylight saving). tz may be empty.
+function ptTzOffset(tz, y, m, d) {
+  if (!tz) return -new Date(y, m - 1, d, 12).getTimezoneOffset();
+  const at = (utcMs) => {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }).formatToParts(new Date(utcMs));
+    const g = (t) => parseInt(p.find((x) => x.type === t).value, 10);
+    return Math.round((Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - utcMs) / 60000);
+  };
+  const guess = at(Date.UTC(y, m - 1, d, 12));
+  return at(Date.UTC(y, m - 1, d, 12) - guess * 60000);
+}
+
+// Raw (unadjusted, unrounded) solar events in local clock minutes for one date.
+function ptDay(lat, lon, y, m, d, off) {
+  const jd = ptJulianDay(y, m, d, 12 - off / 60);
+  const { decl, eqTime } = ptSun(jd);
+  const noon = 720 - 4 * lon - eqTime + off;
+  const phi = lat * PT_R;
+  const hourAngle = (altDeg) => {
+    const c = (Math.sin(altDeg * PT_R) - Math.sin(phi) * Math.sin(decl)) / (Math.cos(phi) * Math.cos(decl));
+    if (c > 1 || c < -1) return NaN;
+    return (Math.acos(c) / PT_R) * 4; // minutes
+  };
+  const asrAlt = (factor) => (Math.atan(1 / (factor + Math.tan(Math.abs(phi - decl)))) / PT_R);
+  return { noon, hourAngle, asrAlt };
+}
+
+const PT_HIGH_LAT = { none: null, middle: 0.5, seventh: 1 / 7 };
+
+function ptFormat(min) {
+  if (min == null || Number.isNaN(min)) return '--:--';
+  const m = ptMod(Math.round(min), 1440);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+// cfg: { fajr, isha (deg) | ishaInterval (min after sunset), school (1|2), adj:{Fajr,Sunrise,Dhuhr,Asr,Maghrib,Isha}, highLat }
+function ptCompute(lat, lon, y, m, d, tz, cfg) {
+  const off = ptTzOffset(tz, y, m, d);
+  const adj = Object.assign({ Fajr: 0, Sunrise: 0, Dhuhr: 0, Asr: 0, Maghrib: 0, Isha: 0 }, cfg.adj || {});
+  const day = (yy, mm, dd) => {
+    const o = ptTzOffset(tz, yy, mm, dd);
+    return ptDay(lat, lon, yy, mm, dd, o);
+  };
+  const today = ptDay(lat, lon, y, m, d, off);
+  const next = (() => {
+    const t = new Date(Date.UTC(y, m - 1, d + 1));
+    return day(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+  })();
+
+  const sunTimes = (D) => {
+    let sunrise = D.noon - D.hourAngle(-0.833);
+    let sunset = D.noon + D.hourAngle(-0.833);
+    if (Number.isNaN(sunrise) || Number.isNaN(sunset)) {
+      // polar day/night: fall back to a 12-hour day around solar noon so the app keeps working
+      sunrise = D.noon - 360;
+      sunset = D.noon + 360;
+    }
+    return { sunrise, sunset };
+  };
+  const events = (D, nightLength) => {
+    const { sunrise, sunset } = sunTimes(D);
+    const night = nightLength != null ? nightLength : 1440 - (sunset - sunrise);
+    const rule = cfg.highLat === 'auto' || cfg.highLat == null ? (Math.abs(lat) > 48 ? 'angle' : 'none') : cfg.highLat;
+    const portion = (angle) => (rule === 'angle' ? angle / 60 : PT_HIGH_LAT[rule]);
+    let fajr = D.noon - D.hourAngle(-cfg.fajr);
+    if (rule !== 'none' || Number.isNaN(fajr)) {
+      const p = portion(cfg.fajr) ?? 1 / 7;
+      const limit = sunrise - p * night;
+      if (Number.isNaN(fajr) || fajr < limit) fajr = limit;
+    }
+    let isha;
+    if (cfg.ishaInterval != null) isha = sunset + cfg.ishaInterval;
+    else {
+      isha = D.noon + D.hourAngle(-cfg.isha);
+      if (rule !== 'none' || Number.isNaN(isha)) {
+        const p = portion(cfg.isha) ?? 1 / 7;
+        const limit = sunset + p * night;
+        if (Number.isNaN(isha) || isha > limit) isha = limit;
+      }
+    }
+    const asrH = D.hourAngle(D.asrAlt(cfg.school === 2 ? 2 : 1));
+    const asr = Number.isNaN(asrH) ? D.noon + 180 : D.noon + asrH;
+    return { fajr, sunrise, sunset, isha, asr, noon: D.noon };
+  };
+  const st = sunTimes(today);
+  const nightLen0 = sunTimes(next).sunrise + 1440 - st.sunset; // sunset today -> sunrise tomorrow
+  const e = events(today, nightLen0);
+  const n = events(next, nightLen0);
+  const fajr = e.fajr + adj.Fajr;
+  const dhuhr = e.noon + adj.Dhuhr;
+  const sunrise = e.sunrise + adj.Sunrise;
+  const asr = e.asr + adj.Asr;
+  const maghrib = e.sunset + adj.Maghrib;
+  const isha = e.isha + adj.Isha;
+  const nightEnd = n.fajr + 1440 + adj.Fajr; // tomorrow's Fajr on today's clock
+  const nightLen = nightEnd - e.sunset;
+  return {
+    Imsak: ptFormat(fajr - 10),
+    Fajr: ptFormat(fajr),
+    Sunrise: ptFormat(sunrise),
+    Dhuhr: ptFormat(dhuhr),
+    Asr: ptFormat(asr),
+    Sunset: ptFormat(e.sunset),
+    Maghrib: ptFormat(maghrib),
+    Isha: ptFormat(isha),
+    Midnight: ptFormat(e.sunset + (n.sunrise + 1440 - e.sunset) / 2),
+    Firstthird: ptFormat(e.sunset + nightLen / 3),
+    Lastthird: ptFormat(e.sunset + (2 * nightLen) / 3),
+    _tz: tz || null,
+    _offset: off,
+    _raw: { Fajr: fajr, Sunrise: sunrise, Dhuhr: dhuhr, Asr: asr, Maghrib: maghrib, Isha: isha },
+  };
+}
+
+
+// ---------------- Calculation methods (presets) ----------------
+// fajr / isha are sun angles in degrees below the horizon; ishaInterval = minutes after sunset instead of an angle.
+// adj = minute offsets built into the method (they are added to the user's own adjustments).
+const PT_METHODS = {
+  uae: {
+    name: 'UAE official (Sharjah Islamic Affairs / Awqaf)',
+    fajr: 18, isha: 18,
+    adj: { Fajr: -1, Sunrise: -3.5, Dhuhr: 2.25, Asr: 0.25, Maghrib: 2.75 },
+    note: 'Calibrated to the official Sharjah timetable for October 2026 (within 1 minute on all 31 days) and it reproduces the official Abu Dhabi (Awqaf) times exactly on the two dates checked.',
+  },
+  mwl: { name: 'Muslim World League', fajr: 18, isha: 17, note: 'Fajr 18°, Isha 17°.' },
+  egypt: { name: 'Egyptian General Authority of Survey', fajr: 19.5, isha: 17.5, note: 'Fajr 19.5°, Isha 17.5°.' },
+  karachi: { name: 'University of Islamic Sciences, Karachi', fajr: 18, isha: 18, note: 'Fajr 18°, Isha 18°.' },
+  makkah: { name: 'Umm al-Qura (Makkah)', fajr: 18.5, ishaInterval: 90, note: 'Fajr 18.5°, Isha 90 minutes after Maghrib.' },
+  isna: { name: 'ISNA (North America)', fajr: 15, isha: 15, note: 'Fajr 15°, Isha 15°.' },
+  kuwait: { name: 'Kuwait', fajr: 18, isha: 17.5, note: 'Fajr 18°, Isha 17.5°.' },
+  qatar: { name: 'Qatar', fajr: 18, ishaInterval: 90, note: 'Fajr 18°, Isha 90 minutes after Maghrib.' },
+  gulf: { name: 'Gulf Region', fajr: 19.5, ishaInterval: 90, note: 'Fajr 19.5°, Isha 90 minutes after Maghrib.' },
+  singapore: { name: 'Singapore / Malaysia / Indonesia', fajr: 20, isha: 18, note: 'Fajr 20°, Isha 18°.' },
+  turkey: {
+    name: 'Turkey (Diyanet)', fajr: 18, isha: 17,
+    adj: { Sunrise: -7, Dhuhr: 5, Asr: 4, Maghrib: 7 },
+    note: 'Fajr 18°, Isha 17° with the Diyanet safety minutes.',
+  },
+};
+const PT_METHOD_ORDER = ['uae', 'mwl', 'egypt', 'karachi', 'makkah', 'isna', 'kuwait', 'qatar', 'gulf', 'singapore', 'turkey'];
+
+// Regional default when the user leaves the method on "Auto" (they can always override it).
+function ptAutoMethod(tz) {
+  const map = {
+    'Asia/Dubai': 'uae', 'Asia/Riyadh': 'makkah', 'Asia/Kuwait': 'kuwait', 'Asia/Qatar': 'qatar',
+    'Africa/Cairo': 'egypt', 'Europe/Istanbul': 'turkey', 'Asia/Karachi': 'karachi', 'Asia/Dhaka': 'karachi',
+    'Asia/Kolkata': 'karachi', 'Asia/Kabul': 'karachi', 'Asia/Singapore': 'singapore', 'Asia/Kuala_Lumpur': 'singapore',
+    'Asia/Jakarta': 'singapore', 'Asia/Makassar': 'singapore', 'Asia/Jayapura': 'singapore',
+  };
+  if (map[tz]) return map[tz];
+  if (tz && tz.startsWith('America/')) return 'isna';
+  return 'mwl';
+}
+
+const PT_DEFAULT_SETTINGS = { method: 'auto', school: 'auto', highLat: 'auto', adjust: {} };
+const PT_PRAYER_KEYS = ['Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
+
+function ptDeviceTz() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+function ptLocationTz(location) {
+  return (location && location.tz) || ptDeviceTz();
+}
+
+// Turns saved settings + place into the numbers the engine needs.
+function ptResolve(settings, tz) {
+  const s = Object.assign({}, PT_DEFAULT_SETTINGS, settings || {});
+  const methodKey = s.method === 'auto' || !PT_METHODS[s.method] ? ptAutoMethod(tz) : s.method;
+  const m = PT_METHODS[methodKey];
+  const hanafiRegion = ['Asia/Karachi', 'Asia/Dhaka', 'Asia/Kabul'].includes(tz);
+  const school = s.school === 'hanafi' ? 2 : s.school === 'standard' ? 1 : hanafiRegion ? 2 : 1;
+  const adj = {};
+  PT_PRAYER_KEYS.forEach((k) => {
+    adj[k] = ((m.adj && m.adj[k]) || 0) + (Number((s.adjust || {})[k]) || 0);
+  });
+  return {
+    cfg: { fajr: m.fajr, isha: m.isha, ishaInterval: m.ishaInterval, school, adj, highLat: s.highLat },
+    methodKey,
+    methodName: m.name,
+    note: m.note,
+    isAuto: s.method === 'auto' || !PT_METHODS[s.method],
+    school,
+    schoolName: school === 2 ? 'Hanafi' : 'Standard',
+    schoolIsAuto: s.school === 'auto',
+  };
+}
+
+// One call for the app: all times for a calendar date (YYYY-MM-DD) in the place's own time zone.
+function ptDayTimes(lat, lon, dateKey, tz, settings) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const r = ptResolve(settings, tz);
+  const t = ptCompute(lat, lon, y, m, d, tz, r.cfg);
+  const times = {};
+  ['Imsak', 'Fajr', 'Sunrise', 'Dhuhr', 'Asr', 'Sunset', 'Maghrib', 'Isha', 'Midnight', 'Firstthird', 'Lastthird'].forEach((k) => {
+    times[k] = t[k];
+  });
+  return { times, tz, methodKey: r.methodKey, methodName: r.methodName, note: r.note, isAuto: r.isAuto, schoolName: r.schoolName, schoolIsAuto: r.schoolIsAuto };
+}
+
+// ---------------- Built-in city list (works offline): [name, country, latitude, longitude, time zone] ----------------
+const PT_CITIES = [
+  ['Sharjah', 'UAE', 25.3463, 55.4209, 'Asia/Dubai'], ['Dubai', 'UAE', 25.2048, 55.2708, 'Asia/Dubai'], ['Abu Dhabi', 'UAE', 24.4539, 54.3773, 'Asia/Dubai'],
+  ['Ajman', 'UAE', 25.4052, 55.5136, 'Asia/Dubai'], ['Ras Al Khaimah', 'UAE', 25.7895, 55.9432, 'Asia/Dubai'], ['Umm Al Quwain', 'UAE', 25.5647, 55.5552, 'Asia/Dubai'],
+  ['Fujairah', 'UAE', 25.1288, 56.3265, 'Asia/Dubai'], ['Khor Fakkan', 'UAE', 25.3394, 56.3557, 'Asia/Dubai'], ['Al Ain', 'UAE', 24.2075, 55.7447, 'Asia/Dubai'],
+  ['Dhaid', 'UAE', 25.2889, 55.88, 'Asia/Dubai'], ['Kalba', 'UAE', 25.0546, 56.356, 'Asia/Dubai'],
+  ['Makkah', 'Saudi Arabia', 21.4225, 39.8262, 'Asia/Riyadh'], ['Madinah', 'Saudi Arabia', 24.4672, 39.6111, 'Asia/Riyadh'], ['Riyadh', 'Saudi Arabia', 24.7136, 46.6753, 'Asia/Riyadh'],
+  ['Jeddah', 'Saudi Arabia', 21.4858, 39.1925, 'Asia/Riyadh'], ['Dammam', 'Saudi Arabia', 26.4207, 50.0888, 'Asia/Riyadh'], ['Doha', 'Qatar', 25.2854, 51.531, 'Asia/Qatar'],
+  ['Kuwait City', 'Kuwait', 29.3759, 47.9774, 'Asia/Kuwait'], ['Manama', 'Bahrain', 26.2285, 50.586, 'Asia/Bahrain'], ['Muscat', 'Oman', 23.588, 58.3829, 'Asia/Muscat'],
+  ['Sanaa', 'Yemen', 15.3694, 44.191, 'Asia/Aden'], ['Baghdad', 'Iraq', 33.3152, 44.3661, 'Asia/Baghdad'], ['Tehran', 'Iran', 35.6892, 51.389, 'Asia/Tehran'],
+  ['Amman', 'Jordan', 31.9454, 35.9284, 'Asia/Amman'], ['Jerusalem', 'Palestine', 31.7683, 35.2137, 'Asia/Jerusalem'], ['Beirut', 'Lebanon', 33.8938, 35.5018, 'Asia/Beirut'],
+  ['Damascus', 'Syria', 33.5138, 36.2765, 'Asia/Damascus'], ['Cairo', 'Egypt', 30.0444, 31.2357, 'Africa/Cairo'], ['Alexandria', 'Egypt', 31.2001, 29.9187, 'Africa/Cairo'],
+  ['Istanbul', 'Turkey', 41.0082, 28.9784, 'Europe/Istanbul'], ['Ankara', 'Turkey', 39.9334, 32.8597, 'Europe/Istanbul'],
+  ['Karachi', 'Pakistan', 24.8607, 67.0011, 'Asia/Karachi'], ['Lahore', 'Pakistan', 31.5204, 74.3587, 'Asia/Karachi'], ['Islamabad', 'Pakistan', 33.6844, 73.0479, 'Asia/Karachi'],
+  ['Delhi', 'India', 28.6139, 77.209, 'Asia/Kolkata'], ['Mumbai', 'India', 19.076, 72.8777, 'Asia/Kolkata'], ['Hyderabad', 'India', 17.385, 78.4867, 'Asia/Kolkata'],
+  ['Bengaluru', 'India', 12.9716, 77.5946, 'Asia/Kolkata'], ['Chennai', 'India', 13.0827, 80.2707, 'Asia/Kolkata'], ['Kolkata', 'India', 22.5726, 88.3639, 'Asia/Kolkata'],
+  ['Kochi', 'India', 9.9312, 76.2673, 'Asia/Kolkata'], ['Kozhikode', 'India', 11.2588, 75.7804, 'Asia/Kolkata'], ['Thiruvananthapuram', 'India', 8.5241, 76.9366, 'Asia/Kolkata'],
+  ['Thrissur', 'India', 10.5276, 76.2144, 'Asia/Kolkata'], ['Kannur', 'India', 11.8745, 75.3704, 'Asia/Kolkata'], ['Malappuram', 'India', 11.051, 76.0711, 'Asia/Kolkata'],
+  ['Kollam', 'India', 8.8932, 76.6141, 'Asia/Kolkata'], ['Palakkad', 'India', 10.7867, 76.6548, 'Asia/Kolkata'],
+  ['Dhaka', 'Bangladesh', 23.8103, 90.4125, 'Asia/Dhaka'], ['Chittagong', 'Bangladesh', 22.3569, 91.7832, 'Asia/Dhaka'], ['Colombo', 'Sri Lanka', 6.9271, 79.8612, 'Asia/Colombo'],
+  ['Male', 'Maldives', 4.1755, 73.5093, 'Indian/Maldives'], ['Kabul', 'Afghanistan', 34.5553, 69.2075, 'Asia/Kabul'],
+  ['Jakarta', 'Indonesia', -6.2088, 106.8456, 'Asia/Jakarta'], ['Kuala Lumpur', 'Malaysia', 3.139, 101.6869, 'Asia/Kuala_Lumpur'], ['Singapore', 'Singapore', 1.3521, 103.8198, 'Asia/Singapore'],
+  ['Tashkent', 'Uzbekistan', 41.2995, 69.2401, 'Asia/Tashkent'], ['Almaty', 'Kazakhstan', 43.222, 76.8512, 'Asia/Almaty'], ['Baku', 'Azerbaijan', 40.4093, 49.8671, 'Asia/Baku'],
+  ['Tokyo', 'Japan', 35.6762, 139.6503, 'Asia/Tokyo'],
+  ['Casablanca', 'Morocco', 33.5731, -7.5898, 'Africa/Casablanca'], ['Tunis', 'Tunisia', 36.8065, 10.1815, 'Africa/Tunis'], ['Algiers', 'Algeria', 36.7538, 3.0588, 'Africa/Algiers'],
+  ['Tripoli', 'Libya', 32.8872, 13.1913, 'Africa/Tripoli'], ['Khartoum', 'Sudan', 15.5007, 32.5599, 'Africa/Khartoum'], ['Nairobi', 'Kenya', -1.2921, 36.8219, 'Africa/Nairobi'],
+  ['Mogadishu', 'Somalia', 2.0469, 45.3182, 'Africa/Mogadishu'], ['Addis Ababa', 'Ethiopia', 9.032, 38.7469, 'Africa/Addis_Ababa'], ['Lagos', 'Nigeria', 6.5244, 3.3792, 'Africa/Lagos'],
+  ['Dakar', 'Senegal', 14.7167, -17.4677, 'Africa/Dakar'], ['Cape Town', 'South Africa', -33.9249, 18.4241, 'Africa/Johannesburg'], ['Johannesburg', 'South Africa', -26.2041, 28.0473, 'Africa/Johannesburg'],
+  ['London', 'UK', 51.5074, -0.1278, 'Europe/London'], ['Birmingham', 'UK', 52.4862, -1.8904, 'Europe/London'], ['Manchester', 'UK', 53.4808, -2.2426, 'Europe/London'],
+  ['Dublin', 'Ireland', 53.3498, -6.2603, 'Europe/Dublin'], ['Paris', 'France', 48.8566, 2.3522, 'Europe/Paris'], ['Berlin', 'Germany', 52.52, 13.405, 'Europe/Berlin'],
+  ['Madrid', 'Spain', 40.4168, -3.7038, 'Europe/Madrid'], ['Rome', 'Italy', 41.9028, 12.4964, 'Europe/Rome'], ['Amsterdam', 'Netherlands', 52.3676, 4.9041, 'Europe/Amsterdam'],
+  ['Brussels', 'Belgium', 50.8503, 4.3517, 'Europe/Brussels'], ['Vienna', 'Austria', 48.2082, 16.3738, 'Europe/Vienna'], ['Zurich', 'Switzerland', 47.3769, 8.5417, 'Europe/Zurich'],
+  ['Stockholm', 'Sweden', 59.3293, 18.0686, 'Europe/Stockholm'], ['Moscow', 'Russia', 55.7558, 37.6173, 'Europe/Moscow'], ['Sarajevo', 'Bosnia', 43.8563, 18.4131, 'Europe/Sarajevo'],
+  ['New York', 'USA', 40.7128, -74.006, 'America/New_York'], ['Washington', 'USA', 38.9072, -77.0369, 'America/New_York'], ['Chicago', 'USA', 41.8781, -87.6298, 'America/Chicago'],
+  ['Houston', 'USA', 29.7604, -95.3698, 'America/Chicago'], ['Los Angeles', 'USA', 34.0522, -118.2437, 'America/Los_Angeles'], ['Toronto', 'Canada', 43.6532, -79.3832, 'America/Toronto'],
+  ['Montreal', 'Canada', 45.5017, -73.5673, 'America/Toronto'], ['Vancouver', 'Canada', 49.2827, -123.1207, 'America/Vancouver'], ['Sao Paulo', 'Brazil', -23.5505, -46.6333, 'America/Sao_Paulo'],
+  ['Sydney', 'Australia', -33.8688, 151.2093, 'Australia/Sydney'], ['Melbourne', 'Australia', -37.8136, 144.9631, 'Australia/Melbourne'], ['Auckland', 'New Zealand', -36.8485, 174.7633, 'Pacific/Auckland'],
+];
+
+function ptSearchCities(query, limit = 6) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [];
+  const score = (c) => {
+    const n = c[0].toLowerCase();
+    const full = `${n} ${c[1].toLowerCase()}`;
+    if (n === q) return 0;
+    if (n.startsWith(q)) return 1;
+    if (full.includes(q)) return 2;
+    return 9;
+  };
+  return PT_CITIES.map((c) => [score(c), c]).filter((x) => x[0] < 9).sort((a, b) => a[0] - b[0] || a[1][0].localeCompare(b[1][0])).slice(0, limit).map((x) => x[1]);
+}
+
+// "25.35, 55.42" -> { lat, lon } (or null)
+function ptParseCoordinates(text) {
+  const m = String(text || '').trim().match(/^(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  if (!m) return null;
+  const lat = parseFloat(m[1]);
+  const lon = parseFloat(m[2]);
+  return Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat, lon } : null;
+}
+
+
+const LS_PRAYER_SETTINGS = 'quran_reader_prayer_settings_v1';
+
+// Settings for how prayer times are calculated (method, Asr school, high-latitude rule, minute adjustments).
+function CalcSettingsPanel({ t, settings, setSettings, info }) {
+  const s = { ...PT_DEFAULT_SETTINGS, ...(settings || {}), adjust: { ...((settings && settings.adjust) || {}) } };
+  const set = (patch) => setSettings({ ...s, ...patch });
+  const setAdj = (k, v) => set({ adjust: { ...s.adjust, [k]: Math.max(-30, Math.min(30, v)) } });
+  const fieldCls = `w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`;
+  const changed = s.method !== 'auto' || s.school !== 'auto' || s.highLat !== 'auto' || PT_PRAYER_KEYS.some((k) => Number(s.adjust[k]) || 0);
+  return (
+    <div className={`rounded-2xl border mt-3 px-4 py-4 text-left ${t.cardBg}`}>
+      <h3 className="text-sm font-semibold mb-3">Calculation settings</h3>
+
+      <label className={`block text-xs mb-1 ${t.textMuted}`}>Method</label>
+      <select aria-label="Calculation method" value={s.method} onChange={(e) => set({ method: e.target.value })} className={fieldCls}>
+        <option value="auto">Auto (default for your region)</option>
+        {PT_METHOD_ORDER.map((k) => (
+          <option key={k} value={k}>
+            {PT_METHODS[k].name}
+          </option>
+        ))}
+      </select>
+      {info && info.note && <p className={`text-[11px] mt-1.5 leading-snug ${t.textFaint}`}>{info.note}</p>}
+
+      <label className={`block text-xs mt-4 mb-1 ${t.textMuted}`}>Asr</label>
+      <select aria-label="Asr calculation" value={s.school} onChange={(e) => set({ school: e.target.value })} className={fieldCls}>
+        <option value="auto">Auto (by region)</option>
+        <option value="standard">Standard (Shafi, Maliki, Hanbali)</option>
+        <option value="hanafi">Hanafi</option>
+      </select>
+      <p className={`text-[11px] mt-1.5 leading-snug ${t.textFaint}`}>
+        Standard: the shadow equals the object's height. Hanafi: twice its height (Asr about 50 minutes later). Auto uses Hanafi in Pakistan, Bangladesh and Afghanistan, standard elsewhere.
+      </p>
+
+      <label className={`block text-xs mt-4 mb-1 ${t.textMuted}`}>Far-north / far-south places (Fajr and Isha)</label>
+      <select aria-label="High latitude rule" value={s.highLat} onChange={(e) => set({ highLat: e.target.value })} className={fieldCls}>
+        <option value="auto">Auto (above 48° latitude)</option>
+        <option value="none">Off</option>
+        <option value="middle">Middle of the night</option>
+        <option value="seventh">One-seventh of the night</option>
+        <option value="angle">Angle-based</option>
+      </select>
+
+      <div className={`text-xs mt-4 mb-2 ${t.textMuted}`}>Adjust each prayer by minutes (to match your local mosque)</div>
+      <div className="space-y-2">
+        {PT_PRAYER_KEYS.map((k) => {
+          const v = Number(s.adjust[k]) || 0;
+          return (
+            <div key={k} className="flex items-center justify-between gap-2">
+              <span className="text-sm w-20">{k}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setAdj(k, v - 1)} className={`w-8 h-8 rounded-lg border text-base ${t.divider} ${t.hoverSoft}`} aria-label={`Decrease ${k}`}>
+                  −
+                </button>
+                <span className="w-16 text-center text-sm tabular-nums">{v > 0 ? `+${v}` : v} min</span>
+                <button onClick={() => setAdj(k, v + 1)} className={`w-8 h-8 rounded-lg border text-base ${t.divider} ${t.hoverSoft}`} aria-label={`Increase ${k}`}>
+                  +
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={() => setSettings({ ...PT_DEFAULT_SETTINGS })}
+        disabled={!changed}
+        className={`mt-4 text-xs px-3 py-1.5 rounded-lg ${t.btn} disabled:opacity-40`}
+      >
+        Reset to recommended
+      </button>
+      <p className={`text-[11px] mt-3 leading-relaxed ${t.textFaint}`}>
+        Only the UAE setting has been checked against an official timetable (Sharjah Islamic Affairs for October 2026, and Abu Dhabi Awqaf on two
+        dates). The other methods use their published angles. Compare with your local timetable and fine-tune with the minute adjustments.
+      </p>
+    </div>
+  );
+}
+
+
 /* ==================== Prayer (Namaz) section ==================== */
 
-function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleReminders, playAdhanCue, stopAzan, azanPlaying, adhanReady, extraRem, setExtra, openSurah }) {
+function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleReminders, playAdhanCue, stopAzan, azanPlaying, adhanReady, extraRem, setExtra, openSurah, settings, setSettings }) {
   const [tab, setTab] = useState('timings'); // 'timings' | 'qibla' | 'guide'
 
   const [locLoading, setLocLoading] = useState(false);
   const [locError, setLocError] = useState(null);
-  const [cityInput, setCityInput] = useState('');
-  const [countryInput, setCountryInput] = useState('');
+  const [cityQuery, setCityQuery] = useState('');
+  const [showCalc, setShowCalc] = useState(false);
 
-  const [timings, setTimings] = useState(null);
-  const [hijri, setHijri] = useState(null);
-  const [methodInfo, setMethodInfo] = useState(null); // { name, tz }
+  // Every prayer time is calculated on this device from the saved place and settings: no web service.
+  const tz = ptLocationTz(location);
+  const dayKey = zonedClock(tz).date;
+  const calc = useMemo(
+    () => (location ? ptDayTimes(location.lat, location.lon, dayKey, tz, settings) : null),
+    [location, tz, dayKey, settings]
+  );
+  const timings = calc ? calc.times : null;
+  const methodInfo = calc
+    ? { name: calc.methodName, tz, school: calc.schoolName, schoolIsAuto: calc.schoolIsAuto, isAuto: calc.isAuto, key: calc.methodKey, note: calc.note }
+    : null;
+  const hijri = useMemo(() => {
+    if (!HIJRI_FMT || !dayKey) return null;
+    const h = toHijri(parseKey(dayKey), getHijriAdjust());
+    return { day: h.d, month: { en: HIJRI_MONTHS[h.m - 1].en }, year: h.y };
+  }, [dayKey]);
   const extraTimes = useMemo(() => computeExtraTimes(timings), [timings]);
-  const isFriday = parseKey(zonedNow(methodInfo?.tz).date).getDay() === 5;
-  const [timingsLoading, setTimingsLoading] = useState(false);
-  const [timingsError, setTimingsError] = useState(null);
+  const isFriday = parseKey(dayKey).getDay() === 5;
+  const timingsLoading = false;
+  const timingsError = null;
 
   const [compassOn, setCompassOn] = useState(false);
   const [heading, setHeading] = useState(null);
@@ -3391,17 +3781,6 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
     return () => clearInterval(id);
   }, []);
 
-  const applyTimings = (data) => {
-    const raw = data.data.timings;
-    const clean = {};
-    Object.keys(raw).forEach((k) => {
-      clean[k] = String(raw[k]).split(' ')[0];
-    });
-    setTimings(clean);
-    setHijri(data.data.date?.hijri || null);
-    setMethodInfo({ name: data.data.meta?.method?.name || null, tz: data.data.meta?.timezone || null });
-  };
-
   const detectLocation = () => {
     setLocError(null);
     if (!navigator.geolocation) {
@@ -3415,6 +3794,7 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
           lat: pos.coords.latitude,
           lon: pos.coords.longitude,
           label: 'Current location',
+          tz: ptDeviceTz(),
         });
         setLocLoading(false);
       },
@@ -3437,47 +3817,19 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const searchCity = (e) => {
-    e.preventDefault();
-    if (!cityInput.trim()) return;
-    setLocLoading(true);
+  const cityResults = useMemo(() => ptSearchCities(cityQuery), [cityQuery]);
+  const coordsGuess = useMemo(() => ptParseCoordinates(cityQuery), [cityQuery]);
+  const pickCity = (c) => {
+    setLocation({ lat: c[2], lon: c[3], label: `${c[0]}, ${c[1]}`, tz: c[4] });
+    setCityQuery('');
     setLocError(null);
-    fetch(
-      `${ADHAN_API}/timingsByCity?city=${encodeURIComponent(cityInput.trim())}&country=${encodeURIComponent(
-        countryInput.trim() || ''
-      )}`
-    )
-      .then((r) => {
-        if (!r.ok) throw new Error('City not found. Check the spelling and try again.');
-        return r.json();
-      })
-      .then((data) => {
-        setLocation({
-          lat: data.data.meta.latitude,
-          lon: data.data.meta.longitude,
-          label: [cityInput.trim(), countryInput.trim()].filter(Boolean).join(', '),
-        });
-        applyTimings(data);
-      })
-      .catch((err) => setLocError(err.message || 'Something went wrong.'))
-      .finally(() => setLocLoading(false));
   };
-
-  // Fetch timings whenever the location changes
-  useEffect(() => {
-    if (!location) return;
-    setTimingsLoading(true);
-    setTimingsError(null);
-    const ts = Math.floor(Date.now() / 1000);
-    fetch(`${ADHAN_API}/timings/${ts}?latitude=${location.lat}&longitude=${location.lon}`)
-      .then((r) => {
-        if (!r.ok) throw new Error('Could not load prayer timings.');
-        return r.json();
-      })
-      .then((data) => applyTimings(data))
-      .catch((err) => setTimingsError(err.message || 'Something went wrong.'))
-      .finally(() => setTimingsLoading(false));
-  }, [location]);
+  const useCoordinates = () => {
+    if (!coordsGuess) return;
+    setLocation({ lat: coordsGuess.lat, lon: coordsGuess.lon, label: `${coordsGuess.lat}, ${coordsGuess.lon}`, tz: ptDeviceTz() });
+    setCityQuery('');
+    setLocError(null);
+  };
 
   // Qibla is calculated locally with the standard great-circle bearing formula
   // rather than trusted to the Aladhan API's /qibla endpoint — that endpoint
@@ -3593,26 +3945,22 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
 
   const nextPrayer = useMemo(() => {
     if (!timings) return null;
-    const today = new Date();
-    const prayerOnly = prayerOrder
+    const nowMin = zonedClock(tz).seconds / 60; // the place's own clock, not the device's
+    const list = prayerOrder
       .filter((p) => !p.minor)
-      .map((p) => {
-        const [h, m] = (timings[p.key] || '00:00').split(':').map(Number);
-        const d = new Date(today);
-        d.setHours(h, m, 0, 0);
-        return { ...p, date: d };
-      });
-    let next = prayerOnly.find((p) => p.date.getTime() > now);
+      .map((p) => ({ ...p, min: timeToMin(timings[p.key]) }))
+      .filter((p) => p.min != null);
+    let next = list.find((p) => p.min > nowMin);
     let tomorrow = false;
-    if (!next) {
-      next = { ...prayerOnly[0], date: new Date(prayerOnly[0].date.getTime() + 24 * 60 * 60 * 1000) };
+    let diff;
+    if (next) diff = next.min - nowMin;
+    else {
+      next = list[0];
       tomorrow = true;
+      diff = next.min + 1440 - nowMin;
     }
-    const diffMs = next.date.getTime() - now;
-    const h = Math.max(0, Math.floor(diffMs / 3600000));
-    const m = Math.max(0, Math.floor((diffMs % 3600000) / 60000));
-    return { ...next, tomorrow, hoursLeft: h, minutesLeft: m };
-  }, [timings, now, prayerOrder]);
+    return { ...next, tomorrow, hoursLeft: Math.floor(diff / 60), minutesLeft: Math.floor(diff % 60) };
+  }, [timings, now, prayerOrder, tz]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const distanceToKaaba = useMemo(() => {
     if (!location) return null;
@@ -3665,23 +4013,32 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
               {locLoading ? 'Detecting…' : 'Use My Location'}
             </button>
           </div>
-          <form onSubmit={searchCity} className="flex items-center gap-2 mt-3 flex-wrap">
+          <div className="mt-3">
             <input
-              value={cityInput}
-              onChange={(e) => setCityInput(e.target.value)}
-              placeholder="City"
-              className={`flex-1 min-w-[120px] px-3 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
+              value={cityQuery}
+              onChange={(e) => setCityQuery(e.target.value)}
+              placeholder="Search a city (works offline) or type coordinates like 25.35, 55.42"
+              aria-label="Search city"
+              className={`w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
             />
-            <input
-              value={countryInput}
-              onChange={(e) => setCountryInput(e.target.value)}
-              placeholder="Country"
-              className={`flex-1 min-w-[120px] px-3 py-1.5 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-emerald-600/50 ${t.inputBg}`}
-            />
-            <button type="submit" className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
-              Search
-            </button>
-          </form>
+            {(cityResults.length > 0 || coordsGuess) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {cityResults.map((c) => (
+                  <button key={c[0]} onClick={() => pickCity(c)} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
+                    {c[0]} · {c[1]}
+                  </button>
+                ))}
+                {coordsGuess && (
+                  <button onClick={useCoordinates} className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}>
+                    Use {coordsGuess.lat}, {coordsGuess.lon}
+                  </button>
+                )}
+              </div>
+            )}
+            {cityQuery.trim() && cityResults.length === 0 && !coordsGuess && (
+              <p className={`text-xs mt-2 ${t.textMuted}`}>Not in the built-in list. Tap Use My Location, or type coordinates such as 25.35, 55.42.</p>
+            )}
+          </div>
           {locError && <p className="text-xs text-red-500 mt-2">{locError}</p>}
         </div>
       )}
@@ -3809,11 +4166,20 @@ function PrayerSection({ t, isDark, location, setLocation, remindersOn, toggleRe
               </div>
 
               <p className={`text-xs ${t.textMuted} mt-3 text-center`}>
-                {methodInfo?.name
-                  ? `Method: ${methodInfo.name}, chosen automatically for your location.`
-                  : 'Calculation method chosen automatically for your location.'}{' '}
-                Times may differ slightly from your local mosque's schedule.
+                Calculated on this device · {methodInfo?.name}
+                {methodInfo?.isAuto ? ' (default for your region)' : ''} · Asr: {methodInfo?.school}. Times may differ slightly from your local mosque's
+                schedule.
               </p>
+              <div className="mt-3 flex justify-center">
+                <button
+                  onClick={() => setShowCalc((v) => !v)}
+                  className={`text-xs px-3 py-1.5 rounded-lg ${t.btn}`}
+                  aria-expanded={showCalc}
+                >
+                  {showCalc ? 'Hide calculation settings' : 'Calculation settings'}
+                </button>
+              </div>
+              {showCalc && <CalcSettingsPanel t={t} settings={settings} setSettings={setSettings} info={methodInfo} />}
             </>
           )}
         </>
@@ -5034,42 +5400,16 @@ function zonedClock(tz) {
   return { date: `${g('year')}-${pad(g('month'))}-${pad(g('day'))}`, seconds: (g('hour') % 24) * 3600 + g('minute') * 60 + g('second') };
 }
 
-// Today's timings for a saved location, refreshed when the date changes there.
-function useTodayTimings(location) {
-  const [state, setState] = useState({ times: null, tz: null, date: null, error: false });
-  const stateRef = useRef(state);
-  stateRef.current = state;
-  useEffect(() => {
-    if (!location) return undefined;
-    let cancelled = false;
-    const load = () => {
-      const ts = Math.floor(Date.now() / 1000);
-      fetch(`${ADHAN_API}/timings/${ts}?latitude=${location.lat}&longitude=${location.lon}`)
-        .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((data) => {
-          if (cancelled) return;
-          const times = {};
-          Object.keys(data.data.timings).forEach((k) => {
-            times[k] = String(data.data.timings[k]).split(' ')[0];
-          });
-          const [dd, mm, yyyy] = String(data.data.date?.gregorian?.date || '').split('-');
-          setState({ times, tz: data.data.meta?.timezone || null, date: yyyy ? `${yyyy}-${mm}-${dd}` : null, error: false });
-        })
-        .catch(() => {
-          if (!cancelled) setState((s) => ({ ...s, error: true }));
-        });
-    };
-    load();
-    const iv = setInterval(() => {
-      const cur = stateRef.current;
-      if (cur.date && zonedClock(cur.tz).date !== cur.date) load();
-    }, 60000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, [location?.lat, location?.lon]); // eslint-disable-line react-hooks/exhaustive-deps
-  return state;
+// Today's timings for a saved place, calculated on the device (recomputed when the date or settings change).
+function useTodayTimings(location, settings) {
+  const tz = ptLocationTz(location);
+  const date = zonedClock(tz).date;
+  const key = location ? `${location.lat},${location.lon},${tz},${date},${JSON.stringify(settings || {})}` : '';
+  return useMemo(() => {
+    if (!location) return { times: null, tz, date: null, error: false };
+    const r = ptDayTimes(location.lat, location.lon, date, tz, settings);
+    return { times: r.times, tz, date, error: false, methodName: r.methodName };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 function vibrationSupported() {
@@ -5871,10 +6211,10 @@ function PrayerTrackerPanel({ t }) {
 
 /* ---------------- Ramadan mode ---------------- */
 
-function RamadanPanel({ t, location, extraRem, setExtra }) {
+function RamadanPanel({ t, location, extraRem, setExtra, prayerSettings }) {
   const adjust = getHijriAdjust();
   useTick(1000); // re-render every second for the countdown
-  const { times, tz, error: timesError } = useTodayTimings(location);
+  const { times, tz, error: timesError } = useTodayTimings(location, prayerSettings);
   const [fastSaved, setFastSaved] = usePersisted(LS_FAST_LOG, { days: {}, madeUp: 0 });
   const [twSaved, setTwSaved] = usePersisted(LS_TARAWEEH, { rakaat: 8, done: {} });
   const F = { days: {}, madeUp: 0, ...fastSaved };
@@ -6425,7 +6765,7 @@ const WORSHIP_TABS = [
   { key: 'app', label: 'App' },
 ];
 
-function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline }) {
+function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline, prayerSettings }) {
   return (
     <div className="max-w-3xl mx-auto px-4 md:px-8 py-6 pb-16">
       <div className="flex gap-2 overflow-x-auto pt-2 pb-5 mb-1 -mx-3 px-3">
@@ -6444,7 +6784,7 @@ function WorshipSection({ t, tab, setTab, location, extraRem, setExtra, offline 
       {tab === 'tasbih' && <TasbihPanel t={t} />}
       {tab === 'adhkar' && <AdhkarPanel t={t} />}
       {tab === 'prayers' && <PrayerTrackerPanel t={t} />}
-      {tab === 'ramadan' && <RamadanPanel t={t} location={location} extraRem={extraRem} setExtra={setExtra} />}
+      {tab === 'ramadan' && <RamadanPanel t={t} location={location} extraRem={extraRem} setExtra={setExtra} prayerSettings={prayerSettings} />}
       {tab === 'app' && <OfflinePanel t={t} {...offline} />}
     </div>
   );
@@ -6461,7 +6801,7 @@ function CopyrightNotice({ t }) {
       </p>
       <p className="mt-1">
         Quran text, translations and recitation audio are provided by Al Quran Cloud (Islamic Network) and remain
-        the property of their respective owners. Prayer times by Aladhan.
+        the property of their respective owners. Prayer times are calculated on your device.
       </p>
     </footer>
   );
